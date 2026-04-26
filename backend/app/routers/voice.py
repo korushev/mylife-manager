@@ -7,11 +7,16 @@ from backend.app.routers.utils import new_id, utc_now
 from backend.app.schemas import (
     StubCapabilityOut,
     TaskOut,
+    VoiceCreateManyOut,
+    VoiceCreateManyRequest,
+    VoiceMessageAnalyzeOut,
+    VoiceMessageAnalyzeRequest,
     VoiceTaskCreateRequest,
     VoiceTaskParseOut,
     VoiceTaskParseRequest,
 )
-from backend.app.services import parse_voice_task
+from backend.app.services.ai_tasks import extract_tasks_from_message
+from backend.app.services.voice_tasks import parse_voice_task
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
@@ -53,48 +58,85 @@ def _validate_refs(
             )
 
 
+def _resolve_task_fields(candidate: dict, payload: VoiceTaskCreateRequest) -> tuple:
+    resolved_title = payload.title or candidate.get("title") or "Новая задача"
+    resolved_note = payload.note if payload.note is not None else candidate.get("note")
+    resolved_status = payload.status or candidate.get("status") or "inbox"
+    resolved_priority = payload.priority or candidate.get("priority") or "medium"
+    resolved_duration = payload.duration_min or candidate.get("duration_min") or 30
+    resolved_deadline = (
+        payload.deadline if payload.deadline is not None else candidate.get("deadline")
+    )
+    return (
+        resolved_title,
+        resolved_note,
+        resolved_status,
+        resolved_priority,
+        resolved_duration,
+        resolved_deadline,
+    )
+
+
 @router.get("/capabilities", response_model=StubCapabilityOut)
 def voice_capabilities() -> StubCapabilityOut:
     return StubCapabilityOut(
         module="voice",
         status="available",
         message=(
-            "Dictate task in voice inbox, get clarification questions, "
-            "and create task with defaults if details are missing."
+            "Voice can parse one message into multiple tasks via DeepSeek/OpenAI/fallback "
+            "and create tasks even when details are partial."
         ),
+    )
+
+
+@router.post("/analyze-message", response_model=VoiceMessageAnalyzeOut)
+def analyze_message(payload: VoiceMessageAnalyzeRequest) -> VoiceMessageAnalyzeOut:
+    result = extract_tasks_from_message(payload.message)
+    return VoiceMessageAnalyzeOut(
+        provider=result["provider"],
+        model=result["model"],
+        tasks=result["tasks"],
+        error=result["error"],
     )
 
 
 @router.post("/parse-task", response_model=VoiceTaskParseOut)
 def parse_task(payload: VoiceTaskParseRequest) -> VoiceTaskParseOut:
-    parsed = parse_voice_task(payload.transcript)
+    result = extract_tasks_from_message(payload.transcript)
+    first = (
+        result["tasks"][0] if result["tasks"] else parse_voice_task(payload.transcript)
+    )
+
     return VoiceTaskParseOut(
         transcript=payload.transcript,
-        title=parsed["title"],
-        note=parsed["note"],
-        status=parsed["status"],
-        priority=parsed["priority"],
-        duration_min=parsed["duration_min"],
-        deadline=parsed["deadline"],
+        title=first["title"],
+        note=first["note"],
+        status=first["status"],
+        priority=first["priority"],
+        duration_min=first["duration_min"],
+        deadline=first["deadline"],
         list_id=payload.list_id,
-        missing_fields=parsed["missing_fields"],
-        requires_clarification=parsed["requires_clarification"],
-        next_question=parsed["next_question"],
+        missing_fields=first["missing_fields"],
+        requires_clarification=first["requires_clarification"],
+        next_question=first["next_question"],
     )
 
 
 @router.post("/create-task", response_model=TaskOut, status_code=201)
 def create_task_from_voice(payload: VoiceTaskCreateRequest) -> dict:
-    parsed = parse_voice_task(payload.transcript)
-
-    resolved_title = payload.title or parsed["title"]
-    resolved_note = payload.note if payload.note is not None else parsed["note"]
-    resolved_status = payload.status or parsed["status"] or "inbox"
-    resolved_priority = payload.priority or parsed["priority"] or "medium"
-    resolved_duration = payload.duration_min or parsed["duration_min"] or 30
-    resolved_deadline = (
-        payload.deadline if payload.deadline is not None else parsed["deadline"]
+    result = extract_tasks_from_message(payload.transcript)
+    first = (
+        result["tasks"][0] if result["tasks"] else parse_voice_task(payload.transcript)
     )
+
+    (
+        resolved_title,
+        resolved_note,
+        resolved_status,
+        resolved_priority,
+        resolved_duration,
+        resolved_deadline,
+    ) = _resolve_task_fields(first, payload)
 
     task_id = new_id()
     now = utc_now()
@@ -127,3 +169,59 @@ def create_task_from_voice(payload: VoiceTaskCreateRequest) -> dict:
         row = conn.execute(f"{TASK_SELECT} WHERE id = ?", (task_id,)).fetchone()
 
     return row_to_dict(row)
+
+
+@router.post(
+    "/create-tasks-from-message", response_model=VoiceCreateManyOut, status_code=201
+)
+def create_tasks_from_message(payload: VoiceCreateManyRequest) -> VoiceCreateManyOut:
+    result = extract_tasks_from_message(payload.message)
+    created: list[dict] = []
+
+    with get_connection() as conn:
+        _validate_refs(
+            conn, payload.list_id, payload.sprint_id, payload.sprint_direction_id
+        )
+
+        for candidate in result["tasks"]:
+            task_id = new_id()
+            now = utc_now()
+
+            resolved_title = candidate.get("title") or "Новая задача"
+            resolved_note = candidate.get("note")
+            resolved_status = candidate.get("status") or "inbox"
+            resolved_priority = candidate.get("priority") or "medium"
+            resolved_duration = candidate.get("duration_min") or 30
+            resolved_deadline = candidate.get("deadline")
+
+            conn.execute(
+                (
+                    "INSERT INTO tasks (id, title, note, status, priority, duration_min, deadline, list_id, "
+                    "sprint_id, sprint_direction_id, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                ),
+                (
+                    task_id,
+                    resolved_title,
+                    resolved_note,
+                    resolved_status,
+                    resolved_priority,
+                    resolved_duration,
+                    resolved_deadline.isoformat() if resolved_deadline else None,
+                    payload.list_id,
+                    payload.sprint_id,
+                    payload.sprint_direction_id,
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(f"{TASK_SELECT} WHERE id = ?", (task_id,)).fetchone()
+            created.append(row_to_dict(row))
+
+    return VoiceCreateManyOut(
+        provider=result["provider"],
+        model=result["model"],
+        created_count=len(created),
+        tasks=created,
+        error=result["error"],
+    )

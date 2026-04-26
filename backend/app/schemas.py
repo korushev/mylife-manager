@@ -244,3 +244,42 @@ class VoiceTaskCreateRequest(BaseModel):
     priority: TaskPriority | None = None
     duration_min: int | None = Field(default=None, ge=1, le=1440)
     deadline: datetime | None = None
+
+
+class VoiceTaskCandidateOut(BaseModel):
+    title: str
+    note: str | None
+    status: TaskStatus | None
+    priority: TaskPriority | None
+    duration_min: int | None
+    deadline: datetime | None
+    missing_fields: list[str]
+    requires_clarification: bool
+    next_question: str | None
+
+
+class VoiceMessageAnalyzeRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=8000)
+    list_id: str | None = None
+
+
+class VoiceMessageAnalyzeOut(BaseModel):
+    provider: str
+    model: str | None
+    tasks: list[VoiceTaskCandidateOut]
+    error: str | None
+
+
+class VoiceCreateManyRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=8000)
+    list_id: str
+    sprint_id: str | None = None
+    sprint_direction_id: str | None = None
+
+
+class VoiceCreateManyOut(BaseModel):
+    provider: str
+    model: str | None
+    created_count: int
+    tasks: list[TaskOut]
+    error: str | None

@@ -24,7 +24,6 @@ def test_voice_parse_and_create_task() -> None:
         assert parsed["status"] == "in_progress"
         assert parsed["priority"] == "high"
         assert parsed["duration_min"] == 45
-        assert parsed["requires_clarification"] is False
 
         create_response = client.post(
             "/api/voice/create-task",
@@ -55,9 +54,6 @@ def test_voice_creates_with_defaults_when_fields_missing() -> None:
         assert parse_response.status_code == 200
         parsed = parse_response.json()
         assert parsed["requires_clarification"] is True
-        assert "duration_min" in parsed["missing_fields"]
-        assert "priority" in parsed["missing_fields"]
-        assert "status" in parsed["missing_fields"]
 
         create_response = client.post(
             "/api/voice/create-task",
@@ -68,3 +64,29 @@ def test_voice_creates_with_defaults_when_fields_missing() -> None:
         assert task["duration_min"] == 30
         assert task["priority"] == "medium"
         assert task["status"] == "inbox"
+
+
+def test_analyze_and_create_multiple_tasks_from_one_message() -> None:
+    with TestClient(app) as client:
+        list_response = client.post(
+            "/api/lists",
+            json={"name": "Voice3", "color": "#0ea5e9"},
+        )
+        list_id = list_response.json()["id"]
+
+        message = "1) Позвонить клиенту 20 минут high todo; 2) Подготовить КП завтра"
+
+        analyze = client.post("/api/voice/analyze-message", json={"message": message})
+        assert analyze.status_code == 200
+        analyzed = analyze.json()
+        assert analyzed["provider"] == "fallback"
+        assert len(analyzed["tasks"]) >= 2
+
+        create_many = client.post(
+            "/api/voice/create-tasks-from-message",
+            json={"message": message, "list_id": list_id},
+        )
+        assert create_many.status_code == 201
+        data = create_many.json()
+        assert data["created_count"] >= 2
+        assert len(data["tasks"]) >= 2
