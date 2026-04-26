@@ -1,15 +1,16 @@
 # MyLife Manager
 
-MVP backend для персонального планирования задач и базового CRM.
+MVP веб-сервис для персонального планирования задач и базового CRM.
 
-## Features
-- Task lists
-- Tasks with statuses, priorities, deadlines, durations
+## What is included
+- Dashboard
+- Tasks List (CRUD)
+- Kanban board (drag-and-drop by status)
 - Sprints with 4 directions
-- Time blocking and calendar feed
+- Calendar / time-block feed
 - CRM contacts and deals
-- AI/Voice stubs
-- Google Calendar integration stub
+- Google Calendar settings stub
+- AI and Voice stubs
 
 ## Quick Start
 ```bash
@@ -19,9 +20,10 @@ pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r bac
 uvicorn backend.app.main:app --reload
 ```
 
-Open docs at `http://127.0.0.1:8000/docs`.
+Open app at `http://127.0.0.1:8000/`.
+API docs at `http://127.0.0.1:8000/docs`.
 
-## Tests and Quality
+## Quality checks
 ```bash
 source .venv/bin/activate
 pytest backend/tests
@@ -29,7 +31,7 @@ flake8 backend
 black --check backend
 ```
 
-## Main API Groups
+## API groups
 - `/api/lists`
 - `/api/tasks`
 - `/api/sprints`

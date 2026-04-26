@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.app.database import init_db
 from backend.app.routers import (
@@ -13,13 +17,22 @@ from backend.app.routers import (
     voice_router,
 )
 
-app = FastAPI(title="MyLife Manager API", version="0.1.0")
+app = FastAPI(title="MyLife Manager API", version="0.2.0")
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 @app.on_event("startup")
 def startup() -> None:
     init_db()
 
+
+@app.get("/", include_in_schema=False)
+def root() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 app.include_router(health_router)
 app.include_router(lists_router)
