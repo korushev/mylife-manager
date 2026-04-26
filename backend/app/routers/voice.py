@@ -60,7 +60,7 @@ def voice_capabilities() -> StubCapabilityOut:
         status="available",
         message=(
             "Dictate task in voice inbox, get clarification questions, "
-            "then create the task."
+            "and create task with defaults if details are missing."
         ),
     )
 
@@ -89,32 +89,12 @@ def create_task_from_voice(payload: VoiceTaskCreateRequest) -> dict:
 
     resolved_title = payload.title or parsed["title"]
     resolved_note = payload.note if payload.note is not None else parsed["note"]
-    resolved_status = payload.status or parsed["status"]
-    resolved_priority = payload.priority or parsed["priority"]
-    resolved_duration = payload.duration_min or parsed["duration_min"]
+    resolved_status = payload.status or parsed["status"] or "inbox"
+    resolved_priority = payload.priority or parsed["priority"] or "medium"
+    resolved_duration = payload.duration_min or parsed["duration_min"] or 30
     resolved_deadline = (
         payload.deadline if payload.deadline is not None else parsed["deadline"]
     )
-
-    missing_fields: list[str] = []
-    if resolved_duration is None:
-        missing_fields.append("duration_min")
-    if resolved_priority is None:
-        missing_fields.append("priority")
-    if resolved_status is None:
-        missing_fields.append("status")
-
-    if missing_fields:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": "Need clarification before task creation",
-                "missing_fields": missing_fields,
-                "next_question": (
-                    "Уточни длительность, приоритет и статус, чтобы сохранить задачу."
-                ),
-            },
-        )
 
     task_id = new_id()
     now = utc_now()

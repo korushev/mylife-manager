@@ -40,7 +40,7 @@ def test_voice_parse_and_create_task() -> None:
         assert task["duration_min"] == 30
 
 
-def test_voice_requires_clarification_when_fields_missing() -> None:
+def test_voice_creates_with_defaults_when_fields_missing() -> None:
     with TestClient(app) as client:
         list_response = client.post(
             "/api/lists",
@@ -63,4 +63,8 @@ def test_voice_requires_clarification_when_fields_missing() -> None:
             "/api/voice/create-task",
             json={"transcript": "Подготовить презентацию", "list_id": list_id},
         )
-        assert create_response.status_code == 400
+        assert create_response.status_code == 201
+        task = create_response.json()
+        assert task["duration_min"] == 30
+        assert task["priority"] == "medium"
+        assert task["status"] == "inbox"

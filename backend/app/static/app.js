@@ -471,14 +471,11 @@ function bindVoice() {
       if (!parsed) {
         return;
       }
-
       if (parsed.requires_clarification) {
         addVoiceMessage(
           "assistant",
-          parsed.next_question || "Нужно уточнить параметры перед сохранением."
+          "Сохраняю задачу с дефолтами, но рекомендую уточнить детали позже."
         );
-        toast("Need clarification first");
-        return;
       }
 
       const task = await api("/api/voice/create-task", {
