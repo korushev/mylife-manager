@@ -215,7 +215,7 @@ class StubCapabilityOut(BaseModel):
 
 
 class VoiceTaskParseRequest(BaseModel):
-    transcript: str = Field(min_length=1, max_length=2000)
+    transcript: str = Field(min_length=1, max_length=4000)
     list_id: str | None = None
 
 
@@ -223,15 +223,24 @@ class VoiceTaskParseOut(BaseModel):
     transcript: str
     title: str
     note: str | None
-    status: TaskStatus
-    priority: TaskPriority
-    duration_min: int
+    status: TaskStatus | None
+    priority: TaskPriority | None
+    duration_min: int | None
     deadline: datetime | None
     list_id: str | None
+    missing_fields: list[str]
+    requires_clarification: bool
+    next_question: str | None
 
 
 class VoiceTaskCreateRequest(BaseModel):
-    transcript: str = Field(min_length=1, max_length=2000)
+    transcript: str = Field(min_length=1, max_length=4000)
     list_id: str
     sprint_id: str | None = None
     sprint_direction_id: str | None = None
+    title: str | None = None
+    note: str | None = None
+    status: TaskStatus | None = None
+    priority: TaskPriority | None = None
+    duration_min: int | None = Field(default=None, ge=1, le=1440)
+    deadline: datetime | None = None

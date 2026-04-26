@@ -7,6 +7,11 @@ const state = {
 
 const TASK_STATUSES = ["inbox", "todo", "in_progress", "done"];
 
+const voiceSession = {
+  parsed: null,
+  finalTranscript: "",
+};
+
 let recognition = null;
 let recognitionActive = false;
 
@@ -15,6 +20,22 @@ function toast(message) {
   node.textContent = message;
   node.classList.add("show");
   window.setTimeout(() => node.classList.remove("show"), 1700);
+}
+
+function addVoiceMessage(role, text) {
+  const log = document.getElementById("voiceChatMessages");
+  const item = document.createElement("div");
+  item.className = `chat-item ${role}`;
+  item.textContent = text;
+  log.appendChild(item);
+  log.scrollTop = log.scrollHeight;
+}
+
+function normalizeApiError(error) {
+  if (typeof error.message !== "string") {
+    return "Request failed";
+  }
+  return error.message;
 }
 
 async function api(path, options = {}) {
@@ -27,7 +48,11 @@ async function api(path, options = {}) {
     let detail = response.statusText;
     try {
       const payload = await response.json();
-      detail = payload.detail || detail;
+      if (typeof payload.detail === "string") {
+        detail = payload.detail;
+      } else if (payload.detail?.message) {
+        detail = payload.detail.message;
+      }
     } catch (_error) {
       detail = response.statusText;
     }
@@ -152,7 +177,7 @@ function renderTasks() {
         toast("Task removed");
         await refreshAll();
       } catch (error) {
-        toast(error.message);
+        toast(normalizeApiError(error));
       }
     });
   });
@@ -167,7 +192,7 @@ function renderTasks() {
         });
         await refreshAll();
       } catch (error) {
-        toast(error.message);
+        toast(normalizeApiError(error));
       }
     });
   });
@@ -195,7 +220,7 @@ function renderKanban() {
         });
         await refreshAll();
       } catch (error) {
-        toast(error.message);
+        toast(normalizeApiError(error));
       }
     });
 
@@ -333,9 +358,51 @@ function getRecognitionClass() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
-function bindVoice() {
+async function parseVoiceTranscript({ announce = true } = {}) {
   const transcriptNode = document.getElementById("voiceTranscript");
   const previewNode = document.getElementById("voicePreview");
+  const transcript = transcriptNode.value.trim();
+
+  if (!transcript) {
+    toast("Transcript is empty");
+    return null;
+  }
+
+  const listId = document.getElementById("voiceListSelect").value || null;
+  const parsed = await api("/api/voice/parse-task", {
+    method: "POST",
+    body: JSON.stringify({ transcript, list_id: listId }),
+  });
+
+  voiceSession.parsed = parsed;
+  previewNode.textContent = JSON.stringify(parsed, null, 2);
+
+  if (announce) {
+    addVoiceMessage("assistant", `Понял задачу: ${parsed.title}`);
+  }
+
+  if (parsed.requires_clarification) {
+    addVoiceMessage(
+      "assistant",
+      parsed.next_question || "Нужны уточнения перед сохранением задачи."
+    );
+  } else {
+    addVoiceMessage(
+      "assistant",
+      "Все поля на месте. Можно нажать Create Task и сохранить задачу."
+    );
+  }
+
+  return parsed;
+}
+
+function bindVoice() {
+  const transcriptNode = document.getElementById("voiceTranscript");
+
+  addVoiceMessage(
+    "assistant",
+    "Диктуй задачу голосом. Если чего-то не хватит, я задам уточняющий вопрос в этом чате."
+  );
 
   const RecognitionClass = getRecognitionClass();
   if (RecognitionClass) {
@@ -345,26 +412,37 @@ function bindVoice() {
     recognition.continuous = true;
 
     recognition.onresult = (event) => {
-      let combined = "";
+      let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        combined += event.results[i][0].transcript + " ";
+        const piece = event.results[i][0].transcript.trim();
+        if (!piece) {
+          continue;
+        }
+        if (event.results[i].isFinal) {
+          voiceSession.finalTranscript = `${voiceSession.finalTranscript} ${piece}`.trim();
+        } else {
+          interim = `${interim} ${piece}`.trim();
+        }
       }
-      transcriptNode.value = `${transcriptNode.value} ${combined}`.trim();
+      transcriptNode.value = `${voiceSession.finalTranscript} ${interim}`.trim();
     };
 
     recognition.onend = () => {
       recognitionActive = false;
+      transcriptNode.value = voiceSession.finalTranscript.trim();
     };
   }
 
   document.getElementById("voiceStartBtn").addEventListener("click", () => {
     if (!recognition) {
       toast("SpeechRecognition is not supported in this browser");
+      addVoiceMessage("assistant", "Открой приложение в Chrome/Edge для голосового ввода.");
       return;
     }
     if (recognitionActive) {
       return;
     }
+    voiceSession.finalTranscript = transcriptNode.value.trim();
     recognition.start();
     recognitionActive = true;
     toast("Dictation started");
@@ -379,50 +457,78 @@ function bindVoice() {
   });
 
   document.getElementById("voiceParseBtn").addEventListener("click", async () => {
-    const transcript = transcriptNode.value.trim();
-    if (!transcript) {
-      toast("Transcript is empty");
-      return;
-    }
-
     try {
-      const parsed = await api("/api/voice/parse-task", {
-        method: "POST",
-        body: JSON.stringify({
-          transcript,
-          list_id: document.getElementById("voiceListSelect").value || null,
-        }),
-      });
-      previewNode.textContent = JSON.stringify(parsed, null, 2);
-      toast("Parsed");
+      await parseVoiceTranscript({ announce: true });
     } catch (error) {
-      toast(error.message);
+      toast(normalizeApiError(error));
+      addVoiceMessage("assistant", normalizeApiError(error));
     }
   });
 
   document.getElementById("voiceCreateBtn").addEventListener("click", async () => {
-    const transcript = transcriptNode.value.trim();
-    const listId = document.getElementById("voiceListSelect").value;
-    if (!transcript) {
-      toast("Transcript is empty");
-      return;
-    }
-    if (!listId) {
-      toast("Select target list");
-      return;
-    }
-
     try {
+      const parsed = voiceSession.parsed || (await parseVoiceTranscript({ announce: false }));
+      if (!parsed) {
+        return;
+      }
+
+      if (parsed.requires_clarification) {
+        addVoiceMessage(
+          "assistant",
+          parsed.next_question || "Нужно уточнить параметры перед сохранением."
+        );
+        toast("Need clarification first");
+        return;
+      }
+
       const task = await api("/api/voice/create-task", {
         method: "POST",
-        body: JSON.stringify({ transcript, list_id: listId }),
+        body: JSON.stringify({
+          transcript: document.getElementById("voiceTranscript").value.trim(),
+          list_id: document.getElementById("voiceListSelect").value,
+          title: parsed.title,
+          note: parsed.note,
+          status: parsed.status,
+          priority: parsed.priority,
+          duration_min: parsed.duration_min,
+          deadline: parsed.deadline,
+        }),
       });
-      previewNode.textContent = JSON.stringify(task, null, 2);
-      transcriptNode.value = "";
+
+      document.getElementById("voicePreview").textContent = JSON.stringify(task, null, 2);
+      addVoiceMessage("assistant", "Готово. Задача сохранена.");
+      document.getElementById("voiceTranscript").value = "";
+      voiceSession.finalTranscript = "";
+      voiceSession.parsed = null;
       toast("Task created from voice");
       await refreshAll();
     } catch (error) {
-      toast(error.message);
+      const text = normalizeApiError(error);
+      toast(text);
+      addVoiceMessage("assistant", text);
+    }
+  });
+
+  document.getElementById("voiceChatForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = document.getElementById("voiceChatInput");
+    const value = input.value.trim();
+    if (!value) {
+      return;
+    }
+
+    addVoiceMessage("user", value);
+    const transcriptNode = document.getElementById("voiceTranscript");
+    transcriptNode.value = `${transcriptNode.value} ${value}`.trim();
+    voiceSession.finalTranscript = transcriptNode.value;
+    input.value = "";
+
+    try {
+      await parseVoiceTranscript({ announce: false });
+    } catch (error) {
+      const text = normalizeApiError(error);
+      toast(text);
+      addVoiceMessage("assistant", text);
     }
   });
 }
@@ -446,7 +552,7 @@ function bindForms() {
       toast("Task created");
       await refreshAll();
     } catch (error) {
-      toast(error.message);
+      toast(normalizeApiError(error));
     }
   });
 
@@ -470,7 +576,7 @@ function bindForms() {
       toast("Task created");
       await refreshAll();
     } catch (error) {
-      toast(error.message);
+      toast(normalizeApiError(error));
     }
   });
 
@@ -491,7 +597,7 @@ function bindForms() {
       toast("Sprint created");
       await refreshAll();
     } catch (error) {
-      toast(error.message);
+      toast(normalizeApiError(error));
     }
   });
 
@@ -511,7 +617,7 @@ function bindForms() {
       toast("Time block saved");
       await refreshAll();
     } catch (error) {
-      toast(error.message);
+      toast(normalizeApiError(error));
     }
   });
 
@@ -530,7 +636,7 @@ function bindForms() {
       document.getElementById("integrationState").textContent = JSON.stringify(response, null, 2);
       toast("Settings saved");
     } catch (error) {
-      toast(error.message);
+      toast(normalizeApiError(error));
     }
   });
 }
@@ -554,7 +660,7 @@ function bindGlobalActions() {
       await refreshAll();
       toast("Refreshed");
     } catch (error) {
-      toast(error.message);
+      toast(normalizeApiError(error));
     }
   });
 }
@@ -568,5 +674,5 @@ async function boot() {
 }
 
 boot().catch((error) => {
-  toast(error.message || "Failed to initialize app");
+  toast(normalizeApiError(error) || "Failed to initialize app");
 });

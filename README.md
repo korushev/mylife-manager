@@ -3,12 +3,19 @@
 MVP веб-сервис для персонального планирования задач с voice-first взаимодействием.
 
 ## Current focus
-- Voice Inbox: диктовка задач и авторазбор в поля задачи
+- Voice Inbox: диктовка задач, анализ и чат-уточнения
 - Dashboard
 - Tasks List (CRUD)
 - Kanban board (drag-and-drop by status)
 - Sprints with 4 directions
 - Calendar / time-block feed
+
+## Voice flow (main UX)
+1. Нажать `Start Dictation` и надиктовать задачу.
+2. Нажать `Analyze`.
+3. Если не хватает полей (длительность/приоритет/статус), система задаст вопрос в чате справа.
+4. Ответить в chat input, пока задача не станет полной.
+5. Нажать `Create Task`.
 
 ## Deferred for next stage
 - CRM UI workflow

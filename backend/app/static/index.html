@@ -10,7 +10,7 @@
     <header class="app-header">
       <div>
         <h1>MyLife Manager</h1>
-        <p>Voice-first planning workspace: dictate first, refine later.</p>
+        <p>Voice-first planning workspace: dictate first, clarify in chat, then save.</p>
       </div>
       <button id="refreshBtn" class="button ghost">Refresh</button>
     </header>
@@ -42,18 +42,27 @@
               <textarea
                 id="voiceTranscript"
                 rows="5"
-                placeholder="Your speech transcript will appear here..."
+                placeholder="Speech transcript appears here. You can edit it manually too."
               ></textarea>
               <select id="voiceListSelect"></select>
               <div class="grid two">
-                <button id="voiceParseBtn" class="button ghost" type="button">Parse Draft</button>
-                <button id="voiceCreateBtn" class="button" type="button">Create Task from Voice</button>
+                <button id="voiceParseBtn" class="button ghost" type="button">Analyze</button>
+                <button id="voiceCreateBtn" class="button" type="button">Create Task</button>
               </div>
             </div>
           </article>
 
           <article class="card">
-            <h2>Parsed Preview</h2>
+            <h2>Voice Chat Clarification</h2>
+            <div id="voiceChatMessages" class="chat-log"></div>
+            <form id="voiceChatForm" class="chat-form">
+              <input
+                id="voiceChatInput"
+                placeholder="Answer clarification question..."
+                autocomplete="off"
+              />
+              <button class="button" type="submit">Send</button>
+            </form>
             <pre id="voicePreview" class="json">{}</pre>
           </article>
         </div>

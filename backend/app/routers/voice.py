@@ -58,7 +58,10 @@ def voice_capabilities() -> StubCapabilityOut:
     return StubCapabilityOut(
         module="voice",
         status="available",
-        message="Dictate a task, parse transcript, and create task from voice input.",
+        message=(
+            "Dictate task in voice inbox, get clarification questions, "
+            "then create the task."
+        ),
     )
 
 
@@ -74,12 +77,45 @@ def parse_task(payload: VoiceTaskParseRequest) -> VoiceTaskParseOut:
         duration_min=parsed["duration_min"],
         deadline=parsed["deadline"],
         list_id=payload.list_id,
+        missing_fields=parsed["missing_fields"],
+        requires_clarification=parsed["requires_clarification"],
+        next_question=parsed["next_question"],
     )
 
 
 @router.post("/create-task", response_model=TaskOut, status_code=201)
 def create_task_from_voice(payload: VoiceTaskCreateRequest) -> dict:
     parsed = parse_voice_task(payload.transcript)
+
+    resolved_title = payload.title or parsed["title"]
+    resolved_note = payload.note if payload.note is not None else parsed["note"]
+    resolved_status = payload.status or parsed["status"]
+    resolved_priority = payload.priority or parsed["priority"]
+    resolved_duration = payload.duration_min or parsed["duration_min"]
+    resolved_deadline = (
+        payload.deadline if payload.deadline is not None else parsed["deadline"]
+    )
+
+    missing_fields: list[str] = []
+    if resolved_duration is None:
+        missing_fields.append("duration_min")
+    if resolved_priority is None:
+        missing_fields.append("priority")
+    if resolved_status is None:
+        missing_fields.append("status")
+
+    if missing_fields:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Need clarification before task creation",
+                "missing_fields": missing_fields,
+                "next_question": (
+                    "Уточни длительность, приоритет и статус, чтобы сохранить задачу."
+                ),
+            },
+        )
+
     task_id = new_id()
     now = utc_now()
 
@@ -95,12 +131,12 @@ def create_task_from_voice(payload: VoiceTaskCreateRequest) -> dict:
             ),
             (
                 task_id,
-                parsed["title"],
-                parsed["note"],
-                parsed["status"],
-                parsed["priority"],
-                parsed["duration_min"],
-                parsed["deadline"].isoformat() if parsed["deadline"] else None,
+                resolved_title,
+                resolved_note,
+                resolved_status,
+                resolved_priority,
+                resolved_duration,
+                resolved_deadline.isoformat() if resolved_deadline else None,
                 payload.list_id,
                 payload.sprint_id,
                 payload.sprint_direction_id,
