@@ -1,16 +1,19 @@
 # MyLife Manager
 
-MVP веб-сервис для персонального планирования задач и базового CRM.
+MVP веб-сервис для персонального планирования задач с voice-first взаимодействием.
 
-## What is included
+## Current focus
+- Voice Inbox: диктовка задач и авторазбор в поля задачи
 - Dashboard
 - Tasks List (CRUD)
 - Kanban board (drag-and-drop by status)
 - Sprints with 4 directions
 - Calendar / time-block feed
-- CRM contacts and deals
-- Google Calendar settings stub
-- AI and Voice stubs
+
+## Deferred for next stage
+- CRM UI workflow
+- Real AI speech-to-text model
+- TTS/voice responses
 
 ## Quick Start
 ```bash
@@ -23,6 +26,11 @@ uvicorn backend.app.main:app --reload
 Open app at `http://127.0.0.1:8000/`.
 API docs at `http://127.0.0.1:8000/docs`.
 
+## Voice endpoints
+- `POST /api/voice/parse-task`
+- `POST /api/voice/create-task`
+- `GET /api/voice/capabilities`
+
 ## Quality checks
 ```bash
 source .venv/bin/activate
@@ -30,15 +38,3 @@ pytest backend/tests
 flake8 backend
 black --check backend
 ```
-
-## API groups
-- `/api/lists`
-- `/api/tasks`
-- `/api/sprints`
-- `/api/time-blocks`
-- `/api/calendar`
-- `/api/crm/contacts`
-- `/api/crm/deals`
-- `/api/integrations/google-calendar`
-- `/api/ai/capabilities`
-- `/api/voice/capabilities`

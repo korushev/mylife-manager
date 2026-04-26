@@ -212,3 +212,26 @@ class StubCapabilityOut(BaseModel):
     module: str
     status: str
     message: str
+
+
+class VoiceTaskParseRequest(BaseModel):
+    transcript: str = Field(min_length=1, max_length=2000)
+    list_id: str | None = None
+
+
+class VoiceTaskParseOut(BaseModel):
+    transcript: str
+    title: str
+    note: str | None
+    status: TaskStatus
+    priority: TaskPriority
+    duration_min: int
+    deadline: datetime | None
+    list_id: str | None
+
+
+class VoiceTaskCreateRequest(BaseModel):
+    transcript: str = Field(min_length=1, max_length=2000)
+    list_id: str
+    sprint_id: str | None = None
+    sprint_direction_id: str | None = None

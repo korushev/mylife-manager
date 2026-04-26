@@ -10,24 +10,56 @@
     <header class="app-header">
       <div>
         <h1>MyLife Manager</h1>
-        <p>Tasks, sprints, calendar, and personal CRM in one workspace.</p>
+        <p>Voice-first planning workspace: dictate first, refine later.</p>
       </div>
       <button id="refreshBtn" class="button ghost">Refresh</button>
     </header>
 
     <nav class="tabs" id="tabs">
-      <button class="tab active" data-view="dashboard">Dashboard</button>
+      <button class="tab active" data-view="voice">Voice Inbox</button>
+      <button class="tab" data-view="dashboard">Dashboard</button>
       <button class="tab" data-view="tasks">Tasks</button>
       <button class="tab" data-view="kanban">Kanban</button>
       <button class="tab" data-view="sprints">Sprints</button>
       <button class="tab" data-view="calendar">Calendar</button>
-      <button class="tab" data-view="crm">CRM</button>
       <button class="tab" data-view="settings">Settings</button>
-      <button class="tab" data-view="ai-voice">AI / Voice</button>
+      <button class="tab" data-view="ai-voice">AI / Voice API</button>
     </nav>
 
     <main>
-      <section class="view active" id="view-dashboard">
+      <section class="view active" id="view-voice">
+        <div class="grid two">
+          <article class="card">
+            <h2>Dictate Task</h2>
+            <p class="hint">
+              Example: "Завтра в работе подготовить презентацию, высокий приоритет, 45 минут".
+            </p>
+            <div class="stack">
+              <div class="grid two">
+                <button id="voiceStartBtn" class="button" type="button">Start Dictation</button>
+                <button id="voiceStopBtn" class="button ghost" type="button">Stop</button>
+              </div>
+              <textarea
+                id="voiceTranscript"
+                rows="5"
+                placeholder="Your speech transcript will appear here..."
+              ></textarea>
+              <select id="voiceListSelect"></select>
+              <div class="grid two">
+                <button id="voiceParseBtn" class="button ghost" type="button">Parse Draft</button>
+                <button id="voiceCreateBtn" class="button" type="button">Create Task from Voice</button>
+              </div>
+            </div>
+          </article>
+
+          <article class="card">
+            <h2>Parsed Preview</h2>
+            <pre id="voicePreview" class="json">{}</pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="view-dashboard">
         <div class="grid two">
           <article class="card">
             <h2>Today</h2>
@@ -121,42 +153,6 @@
         </div>
       </section>
 
-      <section class="view" id="view-crm">
-        <div class="grid two">
-          <article class="card">
-            <h2>Add Contact</h2>
-            <form id="contactForm" class="stack">
-              <input name="full_name" placeholder="Full name" required />
-              <input name="email" type="email" placeholder="Email" />
-              <input name="phone" placeholder="Phone" />
-              <input name="company" placeholder="Company" />
-              <textarea name="note" placeholder="Note"></textarea>
-              <button class="button" type="submit">Add Contact</button>
-            </form>
-            <div id="contactsContainer" class="stack"></div>
-          </article>
-
-          <article class="card">
-            <h2>Add Deal</h2>
-            <form id="dealForm" class="stack">
-              <input name="title" placeholder="Deal title" required />
-              <select name="contact_id" id="dealContactSelect"></select>
-              <select name="status">
-                <option value="lead">Lead</option>
-                <option value="qualified">Qualified</option>
-                <option value="proposal">Proposal</option>
-                <option value="won">Won</option>
-                <option value="lost">Lost</option>
-              </select>
-              <input name="value_amount" type="number" step="0.01" placeholder="Value" />
-              <select name="linked_task_id" id="dealTaskSelect"></select>
-              <button class="button" type="submit">Add Deal</button>
-            </form>
-            <div id="dealsContainer" class="stack"></div>
-          </article>
-        </div>
-      </section>
-
       <section class="view" id="view-settings">
         <div class="card">
           <h2>Google Calendar Integration</h2>
@@ -179,7 +175,7 @@
             <pre id="aiState" class="json"></pre>
           </article>
           <article class="card">
-            <h2>Voice Module</h2>
+            <h2>Voice API</h2>
             <pre id="voiceState" class="json"></pre>
           </article>
         </div>

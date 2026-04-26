@@ -289,3 +289,9 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+.hint {
+  margin-top: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}

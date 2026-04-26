@@ -3,11 +3,12 @@ const state = {
   tasks: [],
   sprints: [],
   timeBlocks: [],
-  contacts: [],
-  deals: [],
 };
 
 const TASK_STATUSES = ["inbox", "todo", "in_progress", "done"];
+
+let recognition = null;
+let recognitionActive = false;
 
 function toast(message) {
   const node = document.getElementById("toast");
@@ -27,7 +28,7 @@ async function api(path, options = {}) {
     try {
       const payload = await response.json();
       detail = payload.detail || detail;
-    } catch (error) {
+    } catch (_error) {
       detail = response.statusText;
     }
     throw new Error(detail || "Request failed");
@@ -65,6 +66,10 @@ async function ensureDefaultList() {
 
 function fillSelect(selectId, items, placeholder, mapper) {
   const select = document.getElementById(selectId);
+  if (!select) {
+    return;
+  }
+
   select.innerHTML = "";
   if (placeholder) {
     const opt = document.createElement("option");
@@ -72,6 +77,7 @@ function fillSelect(selectId, items, placeholder, mapper) {
     opt.textContent = placeholder;
     select.appendChild(opt);
   }
+
   items.forEach((item) => {
     const opt = document.createElement("option");
     const mapped = mapper(item);
@@ -269,41 +275,15 @@ function renderCalendar() {
   });
 }
 
-function renderCRM() {
-  const contactsNode = document.getElementById("contactsContainer");
-  const dealsNode = document.getElementById("dealsContainer");
-
-  contactsNode.innerHTML = state.contacts.length
-    ? state.contacts
-        .map(
-          (contact) => `
-      <article class="crm-item">
-        <strong>${contact.full_name}</strong>
-        <div class="crm-meta">${contact.email || ""} ${contact.company || ""}</div>
-      </article>
-    `
-        )
-        .join("")
-    : '<article class="crm-item">No contacts yet.</article>';
-
-  dealsNode.innerHTML = state.deals.length
-    ? state.deals
-        .map(
-          (deal) => `
-      <article class="crm-item">
-        <strong>${deal.title}</strong>
-        <div class="crm-meta">${deal.status} | ${deal.value_amount || 0}</div>
-      </article>
-    `
-        )
-        .join("")
-    : '<article class="crm-item">No deals yet.</article>';
-}
-
 async function renderStubsAndSettings() {
   const integration = await api("/api/integrations/google-calendar");
-  document.getElementById("integrationState").textContent = JSON.stringify(integration, null, 2);
-  document.querySelector("#integrationForm input[name='enabled']").checked = integration.enabled;
+  document.getElementById("integrationState").textContent = JSON.stringify(
+    integration,
+    null,
+    2
+  );
+  document.querySelector("#integrationForm input[name='enabled']").checked =
+    integration.enabled;
   document.querySelector("#integrationForm textarea[name='settings_json']").value =
     integration.settings_json;
 
@@ -319,17 +299,12 @@ function syncSelects() {
     label: list.name,
   }));
 
+  fillSelect("voiceListSelect", state.lists, null, (list) => ({
+    value: list.id,
+    label: `Voice target: ${list.name}`,
+  }));
+
   fillSelect("timeBlockTaskSelect", state.tasks, null, (task) => ({
-    value: task.id,
-    label: task.title,
-  }));
-
-  fillSelect("dealContactSelect", state.contacts, "No contact", (contact) => ({
-    value: contact.id,
-    label: contact.full_name,
-  }));
-
-  fillSelect("dealTaskSelect", state.tasks, "No task", (task) => ({
     value: task.id,
     label: task.title,
   }));
@@ -340,8 +315,6 @@ async function refreshAll() {
   state.tasks = await api("/api/tasks");
   state.sprints = await api("/api/sprints");
   state.timeBlocks = await api("/api/calendar");
-  state.contacts = await api("/api/crm/contacts");
-  state.deals = await api("/api/crm/deals");
 
   syncSelects();
   renderDashboard();
@@ -349,12 +322,109 @@ async function refreshAll() {
   renderKanban();
   renderSprints();
   renderCalendar();
-  renderCRM();
   await renderStubsAndSettings();
 }
 
 function formValue(form, name) {
   return form.elements[name]?.value?.trim();
+}
+
+function getRecognitionClass() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function bindVoice() {
+  const transcriptNode = document.getElementById("voiceTranscript");
+  const previewNode = document.getElementById("voicePreview");
+
+  const RecognitionClass = getRecognitionClass();
+  if (RecognitionClass) {
+    recognition = new RecognitionClass();
+    recognition.lang = "ru-RU";
+    recognition.interimResults = true;
+    recognition.continuous = true;
+
+    recognition.onresult = (event) => {
+      let combined = "";
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        combined += event.results[i][0].transcript + " ";
+      }
+      transcriptNode.value = `${transcriptNode.value} ${combined}`.trim();
+    };
+
+    recognition.onend = () => {
+      recognitionActive = false;
+    };
+  }
+
+  document.getElementById("voiceStartBtn").addEventListener("click", () => {
+    if (!recognition) {
+      toast("SpeechRecognition is not supported in this browser");
+      return;
+    }
+    if (recognitionActive) {
+      return;
+    }
+    recognition.start();
+    recognitionActive = true;
+    toast("Dictation started");
+  });
+
+  document.getElementById("voiceStopBtn").addEventListener("click", () => {
+    if (recognition && recognitionActive) {
+      recognition.stop();
+      recognitionActive = false;
+      toast("Dictation stopped");
+    }
+  });
+
+  document.getElementById("voiceParseBtn").addEventListener("click", async () => {
+    const transcript = transcriptNode.value.trim();
+    if (!transcript) {
+      toast("Transcript is empty");
+      return;
+    }
+
+    try {
+      const parsed = await api("/api/voice/parse-task", {
+        method: "POST",
+        body: JSON.stringify({
+          transcript,
+          list_id: document.getElementById("voiceListSelect").value || null,
+        }),
+      });
+      previewNode.textContent = JSON.stringify(parsed, null, 2);
+      toast("Parsed");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+
+  document.getElementById("voiceCreateBtn").addEventListener("click", async () => {
+    const transcript = transcriptNode.value.trim();
+    const listId = document.getElementById("voiceListSelect").value;
+    if (!transcript) {
+      toast("Transcript is empty");
+      return;
+    }
+    if (!listId) {
+      toast("Select target list");
+      return;
+    }
+
+    try {
+      const task = await api("/api/voice/create-task", {
+        method: "POST",
+        body: JSON.stringify({ transcript, list_id: listId }),
+      });
+      previewNode.textContent = JSON.stringify(task, null, 2);
+      transcriptNode.value = "";
+      toast("Task created from voice");
+      await refreshAll();
+    } catch (error) {
+      toast(error.message);
+    }
+  });
 }
 
 function bindForms() {
@@ -445,51 +515,6 @@ function bindForms() {
     }
   });
 
-  document.getElementById("contactForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    try {
-      await api("/api/crm/contacts", {
-        method: "POST",
-        body: JSON.stringify({
-          full_name: formValue(form, "full_name"),
-          email: formValue(form, "email") || null,
-          phone: formValue(form, "phone") || null,
-          company: formValue(form, "company") || null,
-          note: formValue(form, "note") || null,
-        }),
-      });
-      form.reset();
-      toast("Contact added");
-      await refreshAll();
-    } catch (error) {
-      toast(error.message);
-    }
-  });
-
-  document.getElementById("dealForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    try {
-      const value = formValue(form, "value_amount");
-      await api("/api/crm/deals", {
-        method: "POST",
-        body: JSON.stringify({
-          title: formValue(form, "title"),
-          contact_id: formValue(form, "contact_id") || null,
-          linked_task_id: formValue(form, "linked_task_id") || null,
-          status: formValue(form, "status"),
-          value_amount: value ? Number(value) : null,
-        }),
-      });
-      form.reset();
-      toast("Deal added");
-      await refreshAll();
-    } catch (error) {
-      toast(error.message);
-    }
-  });
-
   document.getElementById("integrationForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -536,6 +561,7 @@ function bindGlobalActions() {
 
 async function boot() {
   bindTabs();
+  bindVoice();
   bindForms();
   bindGlobalActions();
   await refreshAll();
