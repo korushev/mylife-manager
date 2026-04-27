@@ -239,3 +239,39 @@ def test_voice_chat_can_query_and_update_and_delete_tasks() -> None:
         )
         assert run_delete.status_code == 200
         assert run_delete.json()["affected_count"] >= 2
+
+
+def test_query_intent_does_not_call_provider_for_non_ascii_key(monkeypatch) -> None:
+    monkeypatch.setenv("MYLIFE_AI_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ключ_с_кириллицей")
+
+    with TestClient(app) as client:
+        list_response = client.post(
+            "/api/lists",
+            json={"name": "Query List", "color": "#0ea5e9"},
+        )
+        list_id = list_response.json()["id"]
+
+        client.post(
+            "/api/tasks",
+            json={
+                "title": "Сходить к врачу",
+                "status": "todo",
+                "priority": "medium",
+                "duration_min": 20,
+                "list_id": list_id,
+            },
+        )
+
+        turn = client.post(
+            "/api/voice/chat-turn",
+            json={
+                "message": "Покажи все задачи списком",
+                "list_id": list_id,
+            },
+        )
+        assert turn.status_code == 200
+        data = turn.json()
+        assert data["intent"] == "task_query"
+        assert data["error"] is None
+        assert any(action["action"] == "run_query" for action in data["actions"])

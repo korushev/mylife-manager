@@ -16,11 +16,13 @@ ALLOWED_PRIORITIES = {"low", "medium", "high"}
 
 def _provider_config() -> dict[str, str | None]:
     provider = os.getenv("MYLIFE_AI_PROVIDER", "deepseek").strip().lower()
+    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+    openai_api_key = os.getenv("OPENAI_API_KEY")
 
     if provider == "openai":
         return {
             "provider": "openai",
-            "api_key": os.getenv("OPENAI_API_KEY"),
+            "api_key": openai_api_key.strip() if openai_api_key else None,
             "url": os.getenv(
                 "OPENAI_CHAT_COMPLETIONS_URL",
                 "https://api.openai.com/v1/chat/completions",
@@ -30,7 +32,7 @@ def _provider_config() -> dict[str, str | None]:
 
     return {
         "provider": "deepseek",
-        "api_key": os.getenv("DEEPSEEK_API_KEY"),
+        "api_key": deepseek_api_key.strip() if deepseek_api_key else None,
         "url": os.getenv(
             "DEEPSEEK_CHAT_COMPLETIONS_URL",
             "https://api.deepseek.com/v1/chat/completions",
@@ -333,55 +335,53 @@ def chat_turn_plan(
         else "Активный спринт не выбран. Новые задачи попадут в общий inbox."
     )
 
-    api_key = cfg["api_key"]
-    if not api_key:
-        if operation is not None:
-            operation_type = operation["type"]
-            if operation_type == "query":
-                return {
-                    "provider": "fallback",
-                    "model": None,
-                    "intent": "task_query",
-                    "assistant_reply": (
-                        f"Понял. Могу показать подходящие задачи. {sprint_hint}"
-                    ),
-                    "tasks": [],
-                    "actions": [{"action": "run_query", "label": "Показать задачи"}],
-                    "operation": operation,
-                    "error": extraction["error"],
-                }
-            if operation_type == "delete":
-                return {
-                    "provider": "fallback",
-                    "model": None,
-                    "intent": "task_delete",
-                    "assistant_reply": (
-                        "Понял. Могу удалить подходящие задачи после подтверждения."
-                    ),
-                    "tasks": [],
-                    "actions": [
-                        {"action": "confirm_delete", "label": "Удалить задачи"},
-                        {"action": "skip_tasks", "label": "Отмена"},
-                    ],
-                    "operation": operation,
-                    "error": extraction["error"],
-                }
+    if operation is not None:
+        operation_type = operation["type"]
+        if operation_type == "query":
             return {
-                "provider": "fallback",
-                "model": None,
-                "intent": "task_update",
-                "assistant_reply": (
-                    "Понял. Могу обновить статус подходящих задач после подтверждения."
+                "provider": (
+                    runtime["provider"] if runtime["configured"] else "fallback"
                 ),
+                "model": runtime["model"] if runtime["configured"] else None,
+                "intent": "task_query",
+                "assistant_reply": f"Понял. Могу показать подходящие задачи. {sprint_hint}",
+                "tasks": [],
+                "actions": [{"action": "run_query", "label": "Показать задачи"}],
+                "operation": operation,
+                "error": None,
+            }
+        if operation_type == "delete":
+            return {
+                "provider": (
+                    runtime["provider"] if runtime["configured"] else "fallback"
+                ),
+                "model": runtime["model"] if runtime["configured"] else None,
+                "intent": "task_delete",
+                "assistant_reply": "Понял. Могу удалить подходящие задачи после подтверждения.",
                 "tasks": [],
                 "actions": [
-                    {"action": "confirm_update_status", "label": "Обновить статус"},
+                    {"action": "confirm_delete", "label": "Удалить задачи"},
                     {"action": "skip_tasks", "label": "Отмена"},
                 ],
                 "operation": operation,
-                "error": extraction["error"],
+                "error": None,
             }
+        return {
+            "provider": runtime["provider"] if runtime["configured"] else "fallback",
+            "model": runtime["model"] if runtime["configured"] else None,
+            "intent": "task_update",
+            "assistant_reply": "Понял. Могу обновить статус подходящих задач после подтверждения.",
+            "tasks": [],
+            "actions": [
+                {"action": "confirm_update_status", "label": "Обновить статус"},
+                {"action": "skip_tasks", "label": "Отмена"},
+            ],
+            "operation": operation,
+            "error": None,
+        }
 
+    api_key = cfg["api_key"]
+    if not api_key:
         has_tasks = len(tasks) > 0
         intent = "task_capture" if has_tasks else "question"
         actions = (
