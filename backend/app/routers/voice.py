@@ -7,6 +7,10 @@ from backend.app.routers.utils import new_id, utc_now
 from backend.app.schemas import (
     StubCapabilityOut,
     TaskOut,
+    VoiceChatTurnOut,
+    VoiceChatTurnRequest,
+    VoiceConfirmTasksOut,
+    VoiceConfirmTasksRequest,
     VoiceCreateManyOut,
     VoiceCreateManyRequest,
     VoiceMessageAnalyzeOut,
@@ -16,6 +20,7 @@ from backend.app.schemas import (
     VoiceTaskParseRequest,
 )
 from backend.app.services.ai_tasks import (
+    chat_turn_plan,
     extract_tasks_from_message,
     provider_runtime_status,
 )
@@ -89,8 +94,75 @@ def voice_capabilities() -> StubCapabilityOut:
         status="available",
         message=(
             f"AI provider={runtime['provider']} ({mode}), model={runtime['model']}. "
-            "Use analyze-message for LLM parsing; fallback only if provider is unavailable."
+            "Chat-first flow: chat-turn -> confirm-tasks."
         ),
+    )
+
+
+@router.post("/chat-turn", response_model=VoiceChatTurnOut)
+def chat_turn(payload: VoiceChatTurnRequest) -> VoiceChatTurnOut:
+    plan = chat_turn_plan(payload.message)
+    return VoiceChatTurnOut(
+        provider=plan["provider"],
+        model=plan["model"],
+        intent=plan["intent"],
+        assistant_reply=plan["assistant_reply"],
+        tasks=plan["tasks"],
+        actions=plan["actions"],
+        error=plan["error"],
+    )
+
+
+@router.post("/confirm-tasks", response_model=VoiceConfirmTasksOut, status_code=201)
+def confirm_tasks(payload: VoiceConfirmTasksRequest) -> VoiceConfirmTasksOut:
+    created: list[dict] = []
+
+    with get_connection() as conn:
+        _validate_refs(
+            conn, payload.list_id, payload.sprint_id, payload.sprint_direction_id
+        )
+
+        for candidate in payload.tasks:
+            task_id = new_id()
+            now = utc_now()
+
+            resolved_title = candidate.title or "Новая задача"
+            resolved_note = candidate.note
+            resolved_status = candidate.status or "inbox"
+            resolved_priority = candidate.priority or "medium"
+            resolved_duration = candidate.duration_min or 30
+            resolved_deadline = candidate.deadline
+
+            conn.execute(
+                (
+                    "INSERT INTO tasks (id, title, note, status, priority, duration_min, deadline, list_id, "
+                    "sprint_id, sprint_direction_id, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                ),
+                (
+                    task_id,
+                    resolved_title,
+                    resolved_note,
+                    resolved_status,
+                    resolved_priority,
+                    resolved_duration,
+                    resolved_deadline.isoformat() if resolved_deadline else None,
+                    payload.list_id,
+                    payload.sprint_id,
+                    payload.sprint_direction_id,
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(f"{TASK_SELECT} WHERE id = ?", (task_id,)).fetchone()
+            created.append(row_to_dict(row))
+
+    runtime = provider_runtime_status()
+    return VoiceConfirmTasksOut(
+        provider=runtime["provider"],
+        model=runtime["model"],
+        created_count=len(created),
+        tasks=created,
     )
 
 

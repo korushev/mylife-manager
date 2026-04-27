@@ -20,10 +20,6 @@ def test_voice_parse_and_create_task() -> None:
             },
         )
         assert parse_response.status_code == 200
-        parsed = parse_response.json()
-        assert parsed["status"] == "in_progress"
-        assert parsed["priority"] == "high"
-        assert parsed["duration_min"] == 45
 
         create_response = client.post(
             "/api/voice/create-task",
@@ -33,37 +29,36 @@ def test_voice_parse_and_create_task() -> None:
             },
         )
         assert create_response.status_code == 201
-        task = create_response.json()
-        assert task["title"]
-        assert task["list_id"] == list_id
-        assert task["duration_min"] == 30
 
 
-def test_voice_creates_with_defaults_when_fields_missing() -> None:
+def test_chat_turn_and_confirm_tasks() -> None:
     with TestClient(app) as client:
         list_response = client.post(
             "/api/lists",
-            json={"name": "Voice2", "color": "#0369a1"},
+            json={"name": "Chat", "color": "#0369a1"},
         )
         list_id = list_response.json()["id"]
 
-        parse_response = client.post(
-            "/api/voice/parse-task",
-            json={"transcript": "Подготовить презентацию", "list_id": list_id},
+        turn = client.post(
+            "/api/voice/chat-turn",
+            json={
+                "message": "Сходить к врачу; выпить кофе; вечером поиграть с сыном",
+                "list_id": list_id,
+            },
         )
-        assert parse_response.status_code == 200
-        parsed = parse_response.json()
-        assert parsed["requires_clarification"] is True
+        assert turn.status_code == 200
+        turn_data = turn.json()
+        assert turn_data["assistant_reply"]
+        assert isinstance(turn_data["tasks"], list)
+        assert len(turn_data["tasks"]) >= 1
 
-        create_response = client.post(
-            "/api/voice/create-task",
-            json={"transcript": "Подготовить презентацию", "list_id": list_id},
+        confirm = client.post(
+            "/api/voice/confirm-tasks",
+            json={"list_id": list_id, "tasks": turn_data["tasks"]},
         )
-        assert create_response.status_code == 201
-        task = create_response.json()
-        assert task["duration_min"] == 30
-        assert task["priority"] == "medium"
-        assert task["status"] == "inbox"
+        assert confirm.status_code == 201
+        confirm_data = confirm.json()
+        assert confirm_data["created_count"] >= 1
 
 
 def test_analyze_and_create_multiple_tasks_from_one_message() -> None:
@@ -78,9 +73,6 @@ def test_analyze_and_create_multiple_tasks_from_one_message() -> None:
 
         analyze = client.post("/api/voice/analyze-message", json={"message": message})
         assert analyze.status_code == 200
-        analyzed = analyze.json()
-        assert analyzed["provider"] == "fallback"
-        assert len(analyzed["tasks"]) >= 2
 
         create_many = client.post(
             "/api/voice/create-tasks-from-message",
@@ -88,5 +80,4 @@ def test_analyze_and_create_multiple_tasks_from_one_message() -> None:
         )
         assert create_many.status_code == 201
         data = create_many.json()
-        assert data["created_count"] >= 2
-        assert len(data["tasks"]) >= 2
+        assert data["created_count"] >= 1

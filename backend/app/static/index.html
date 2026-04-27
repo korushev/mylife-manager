@@ -10,13 +10,13 @@
     <header class="app-header">
       <div>
         <h1>MyLife Manager</h1>
-        <p>Voice-first planning workspace: dictate first, clarify in chat, then save.</p>
+        <p>Chat-first AI copilot: talk naturally, confirm actions quickly.</p>
       </div>
       <button id="refreshBtn" class="button ghost">Refresh</button>
     </header>
 
     <nav class="tabs" id="tabs">
-      <button class="tab active" data-view="voice">Voice Inbox</button>
+      <button class="tab active" data-view="voice">AI Chat</button>
       <button class="tab" data-view="dashboard">Dashboard</button>
       <button class="tab" data-view="tasks">Tasks</button>
       <button class="tab" data-view="kanban">Kanban</button>
@@ -30,39 +30,33 @@
       <section class="view active" id="view-voice">
         <div class="grid two">
           <article class="card">
-            <h2>Dictate Task</h2>
+            <h2>AI Dialogue</h2>
             <p class="hint">
-              Example: "Завтра в работе подготовить презентацию, высокий приоритет, 45 минут".
+              Speak or type naturally: tasks, questions, focus help. Assistant will decide what to do.
             </p>
-            <div class="stack">
-              <div class="grid two">
-                <button id="voiceStartBtn" class="button" type="button">Start Dictation</button>
-                <button id="voiceStopBtn" class="button ghost" type="button">Stop</button>
-              </div>
-              <textarea
-                id="voiceTranscript"
-                rows="5"
-                placeholder="Speech transcript appears here. You can edit it manually too."
-              ></textarea>
-              <select id="voiceListSelect"></select>
-              <div class="grid two">
-                <button id="voiceParseBtn" class="button ghost" type="button">Analyze</button>
-                <button id="voiceCreateBtn" class="button" type="button">Create Task</button>
-              </div>
-            </div>
-          </article>
 
-          <article class="card">
-            <h2>Voice Chat Clarification</h2>
             <div id="voiceChatMessages" class="chat-log"></div>
+            <div id="voiceActionChips" class="chips"></div>
+
             <form id="voiceChatForm" class="chat-form">
               <input
                 id="voiceChatInput"
-                placeholder="Answer clarification question..."
+                placeholder="Например: Сегодня нужно три задачи..."
                 autocomplete="off"
               />
               <button class="button" type="submit">Send</button>
             </form>
+
+            <div class="grid two" style="margin-top: 0.6rem">
+              <button id="voiceStartBtn" class="button" type="button">Start Dictation</button>
+              <button id="voiceStopBtn" class="button ghost" type="button">Stop</button>
+            </div>
+
+            <select id="voiceListSelect" style="margin-top: 0.6rem"></select>
+          </article>
+
+          <article class="card">
+            <h2>Current Turn JSON</h2>
             <pre id="voicePreview" class="json">{}</pre>
           </article>
         </div>

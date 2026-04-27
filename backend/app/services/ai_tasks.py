@@ -223,3 +223,132 @@ def extract_tasks_from_message(message: str) -> dict[str, Any]:
             "tasks": _fallback_tasks(message),
             "error": f"Provider call failed: {exc}",
         }
+
+
+def chat_turn_plan(message: str) -> dict[str, Any]:
+    cfg = _provider_config()
+    runtime = provider_runtime_status()
+
+    # Always extract structured tasks first (provider or fallback).
+    extraction = extract_tasks_from_message(message)
+    tasks = extraction["tasks"]
+
+    api_key = cfg["api_key"]
+    if not api_key:
+        has_tasks = len(tasks) > 0
+        intent = "task_capture" if has_tasks else "question"
+        actions = (
+            [
+                {"action": "save_tasks", "label": "Записать задачи"},
+                {"action": "edit_tasks", "label": "Исправить"},
+                {"action": "skip_tasks", "label": "Не записывать"},
+            ]
+            if has_tasks
+            else [{"action": "continue_chat", "label": "Продолжить"}]
+        )
+        reply = (
+            f"Я выделил {len(tasks)} задач(и). Хочешь, сразу запишу их?"
+            if has_tasks
+            else "Понял тебя. Могу помочь разложить задачи, сфокусироваться или ответить на вопрос."
+        )
+        return {
+            "provider": runtime["provider"] if runtime["configured"] else "fallback",
+            "model": runtime["model"] if runtime["configured"] else None,
+            "intent": intent,
+            "assistant_reply": reply,
+            "tasks": tasks,
+            "actions": actions,
+            "error": extraction["error"],
+        }
+
+    system_prompt = (
+        "You are a helpful planning copilot. "
+        "Classify user message intent into: task_capture, question, coaching, mixed. "
+        "If tasks exist, propose concise friendly confirmation and quick actions. "
+        "Return strict JSON only with shape: "
+        '{"intent":string,"assistant_reply":string,"actions":[{"action":string,"label":string}]}. '
+        "Keep assistant_reply short and natural in Russian."
+    )
+
+    payload = {
+        "model": cfg["model"],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message},
+        ],
+        "temperature": 0.3,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(
+                str(cfg["url"]),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        parsed = _extract_json_from_text(content)
+
+        intent = str(parsed.get("intent") or "mixed")
+        assistant_reply = str(
+            parsed.get("assistant_reply") or "Готов помочь. Продолжаем?"
+        )
+
+        raw_actions = parsed.get("actions")
+        actions: list[dict[str, str]] = []
+        if isinstance(raw_actions, list):
+            for item in raw_actions:
+                if not isinstance(item, dict):
+                    continue
+                action = str(item.get("action") or "continue_chat")
+                label = str(item.get("label") or "Продолжить")
+                actions.append({"action": action, "label": label})
+
+        if not actions:
+            if tasks:
+                actions = [
+                    {"action": "save_tasks", "label": "Записать задачи"},
+                    {"action": "edit_tasks", "label": "Исправить"},
+                    {"action": "skip_tasks", "label": "Не записывать"},
+                ]
+            else:
+                actions = [{"action": "continue_chat", "label": "Продолжить"}]
+
+        return {
+            "provider": extraction["provider"],
+            "model": extraction["model"],
+            "intent": intent,
+            "assistant_reply": assistant_reply,
+            "tasks": tasks,
+            "actions": actions,
+            "error": extraction["error"],
+        }
+    except Exception as exc:  # noqa: BLE001
+        has_tasks = len(tasks) > 0
+        return {
+            "provider": "fallback",
+            "model": None,
+            "intent": "task_capture" if has_tasks else "question",
+            "assistant_reply": (
+                f"Я выделил {len(tasks)} задач(и). Хочешь, сразу запишу их?"
+                if has_tasks
+                else "Я рядом. Опиши цель, и я помогу сфокусироваться."
+            ),
+            "tasks": tasks,
+            "actions": (
+                [
+                    {"action": "save_tasks", "label": "Записать задачи"},
+                    {"action": "edit_tasks", "label": "Исправить"},
+                    {"action": "skip_tasks", "label": "Не записывать"},
+                ]
+                if has_tasks
+                else [{"action": "continue_chat", "label": "Продолжить"}]
+            ),
+            "error": f"Chat plan provider failed: {exc}",
+        }

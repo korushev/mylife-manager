@@ -283,3 +283,37 @@ class VoiceCreateManyOut(BaseModel):
     created_count: int
     tasks: list[TaskOut]
     error: str | None
+
+
+class VoiceQuickActionOut(BaseModel):
+    action: str
+    label: str
+
+
+class VoiceChatTurnRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=8000)
+    list_id: str | None = None
+
+
+class VoiceChatTurnOut(BaseModel):
+    provider: str
+    model: str | None
+    intent: str
+    assistant_reply: str
+    tasks: list[VoiceTaskCandidateOut]
+    actions: list[VoiceQuickActionOut]
+    error: str | None
+
+
+class VoiceConfirmTasksRequest(BaseModel):
+    list_id: str
+    tasks: list[VoiceTaskCandidateOut]
+    sprint_id: str | None = None
+    sprint_direction_id: str | None = None
+
+
+class VoiceConfirmTasksOut(BaseModel):
+    provider: str
+    model: str | None
+    created_count: int
+    tasks: list[TaskOut]

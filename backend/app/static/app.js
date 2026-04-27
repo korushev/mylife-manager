@@ -359,57 +359,110 @@ function getRecognitionClass() {
 }
 
 async function parseVoiceTranscript({ announce = true } = {}) {
-  const transcriptNode = document.getElementById("voiceTranscript");
+  const inputNode = document.getElementById("voiceChatInput");
   const previewNode = document.getElementById("voicePreview");
-  const message = transcriptNode.value.trim();
+  const message = inputNode.value.trim();
 
   if (!message) {
-    toast("Transcript is empty");
+    toast("Message is empty");
     return null;
   }
 
-  const listId = document.getElementById("voiceListSelect").value || null;
-  const analyzed = await api("/api/voice/analyze-message", {
+  addVoiceMessage("user", message);
+  inputNode.value = "";
+
+  const plan = await api("/api/voice/chat-turn", {
     method: "POST",
-    body: JSON.stringify({ message, list_id: listId }),
+    body: JSON.stringify({
+      message,
+      list_id: document.getElementById("voiceListSelect").value || null,
+    }),
   });
 
-  voiceSession.parsed = analyzed;
-  previewNode.textContent = JSON.stringify(analyzed, null, 2);
-
-  const count = analyzed.tasks?.length || 0;
-  if (announce) {
-    addVoiceMessage("assistant", `Понял ${count} задач(и). Источник: ${analyzed.provider}${analyzed.model ? ` (${analyzed.model})` : ""}.`);
-  }
-
-  if (!analyzed.tasks || analyzed.tasks.length === 0) {
-    addVoiceMessage("assistant", "Не смог выделить задачи. Попробуй переформулировать.");
-    if (analyzed.error) {
-      addVoiceMessage("assistant", `Причина fallback: ${analyzed.error}`);
-    }
-    return analyzed;
-  }
-
-  const hasMissing = analyzed.tasks.some((task) => task.requires_clarification);
-  if (hasMissing) {
-    addVoiceMessage("assistant", "Есть задачи с недостающими полями. Сохраню с дефолтами.");
-  } else {
-    addVoiceMessage("assistant", "Все поля на месте. Можно сохранить все задачи.");
-  }
-
-  if (analyzed.error) {
-    addVoiceMessage("assistant", `Внимание: DeepSeek не ответил, включен fallback. Причина: ${analyzed.error}`);
-  }
-
-  return analyzed;
-}
-
-function bindVoice() {
-  const transcriptNode = document.getElementById("voiceTranscript");
+  voiceSession.parsed = plan;
+  previewNode.textContent = JSON.stringify(plan, null, 2);
 
   addVoiceMessage(
     "assistant",
-    "Диктуй задачу голосом. Если чего-то не хватит, я задам уточняющий вопрос в этом чате."
+    `${plan.assistant_reply} [${plan.provider}${plan.model ? `:${plan.model}` : ""}]`
+  );
+
+  renderVoiceActions(plan.actions || []);
+
+  if (plan.error) {
+    addVoiceMessage("assistant", `Fallback reason: ${plan.error}`);
+  }
+
+  if (announce && plan.tasks?.length) {
+    addVoiceMessage("assistant", `Я выделил задач: ${plan.tasks.length}.`);
+  }
+
+  return plan;
+}
+
+function renderVoiceActions(actions) {
+  const wrap = document.getElementById("voiceActionChips");
+  wrap.innerHTML = "";
+
+  actions.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip";
+    btn.textContent = item.label;
+    btn.dataset.action = item.action;
+    wrap.appendChild(btn);
+  });
+}
+
+async function handleVoiceAction(action) {
+  if (!voiceSession.parsed) {
+    return;
+  }
+
+  if (action === "save_tasks") {
+    const created = await api("/api/voice/confirm-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        list_id: document.getElementById("voiceListSelect").value,
+        tasks: voiceSession.parsed.tasks || [],
+      }),
+    });
+
+    addVoiceMessage(
+      "assistant",
+      `Готово. Записал задач: ${created.created_count}.`
+    );
+    document.getElementById("voicePreview").textContent = JSON.stringify(created, null, 2);
+    voiceSession.parsed = null;
+    renderVoiceActions([]);
+    await refreshAll();
+    return;
+  }
+
+  if (action === "skip_tasks") {
+    addVoiceMessage("assistant", "Ок, не записываю. Чем еще помочь?");
+    voiceSession.parsed = null;
+    renderVoiceActions([]);
+    return;
+  }
+
+  if (action === "edit_tasks") {
+    addVoiceMessage(
+      "assistant",
+      "Напиши правку сообщением: например 'у второй задачи приоритет high'."
+    );
+    return;
+  }
+
+  addVoiceMessage("assistant", "Продолжим. Напиши или надиктуй следующее сообщение.");
+}
+
+function bindVoice() {
+  const inputNode = document.getElementById("voiceChatInput");
+
+  addVoiceMessage(
+    "assistant",
+    "Привет. Я могу выделять задачи, отвечать на вопросы и помогать с фокусом."
   );
 
   const RecognitionClass = getRecognitionClass();
@@ -417,40 +470,37 @@ function bindVoice() {
     recognition = new RecognitionClass();
     recognition.lang = "ru-RU";
     recognition.interimResults = true;
-    recognition.continuous = true;
+    recognition.continuous = false;
 
     recognition.onresult = (event) => {
-      let interim = "";
+      let text = "";
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const piece = event.results[i][0].transcript.trim();
-        if (!piece) {
-          continue;
-        }
-        if (event.results[i].isFinal) {
-          voiceSession.finalTranscript = `${voiceSession.finalTranscript} ${piece}`.trim();
-        } else {
-          interim = `${interim} ${piece}`.trim();
-        }
+        text += event.results[i][0].transcript + " ";
       }
-      transcriptNode.value = `${voiceSession.finalTranscript} ${interim}`.trim();
+      inputNode.value = text.trim();
     };
 
-    recognition.onend = () => {
+    recognition.onend = async () => {
       recognitionActive = false;
-      transcriptNode.value = voiceSession.finalTranscript.trim();
+      if (inputNode.value.trim()) {
+        try {
+          await parseVoiceTranscript({ announce: true });
+        } catch (error) {
+          toast(normalizeApiError(error));
+          addVoiceMessage("assistant", normalizeApiError(error));
+        }
+      }
     };
   }
 
   document.getElementById("voiceStartBtn").addEventListener("click", () => {
     if (!recognition) {
       toast("SpeechRecognition is not supported in this browser");
-      addVoiceMessage("assistant", "Открой приложение в Chrome/Edge для голосового ввода.");
       return;
     }
     if (recognitionActive) {
       return;
     }
-    voiceSession.finalTranscript = transcriptNode.value.trim();
     recognition.start();
     recognitionActive = true;
     toast("Dictation started");
@@ -464,7 +514,8 @@ function bindVoice() {
     }
   });
 
-  document.getElementById("voiceParseBtn").addEventListener("click", async () => {
+  document.getElementById("voiceChatForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
     try {
       await parseVoiceTranscript({ announce: true });
     } catch (error) {
@@ -473,62 +524,16 @@ function bindVoice() {
     }
   });
 
-  document.getElementById("voiceCreateBtn").addEventListener("click", async () => {
-    try {
-      const analyzed = voiceSession.parsed || (await parseVoiceTranscript({ announce: false }));
-      if (!analyzed) {
-        return;
-      }
-
-      if (analyzed.tasks?.some((task) => task.requires_clarification)) {
-        addVoiceMessage("assistant", "Сохраняю задачи с дефолтами для недостающих полей.");
-      }
-
-      const created = await api("/api/voice/create-tasks-from-message", {
-        method: "POST",
-        body: JSON.stringify({
-          message: document.getElementById("voiceTranscript").value.trim(),
-          list_id: document.getElementById("voiceListSelect").value,
-        }),
-      });
-
-      document.getElementById("voicePreview").textContent = JSON.stringify(created, null, 2);
-      addVoiceMessage("assistant", `Готово. Сохранено задач: ${created.created_count}. Источник: ${created.provider}${created.model ? ` (${created.model})` : ""}.`);
-      document.getElementById("voiceTranscript").value = "";
-      voiceSession.finalTranscript = "";
-      voiceSession.parsed = null;
-      if (created.error) {
-        addVoiceMessage("assistant", `Причина fallback: ${created.error}`);
-      }
-      toast("Tasks created from voice");
-      await refreshAll();
-    } catch (error) {
-      const text = normalizeApiError(error);
-      toast(text);
-      addVoiceMessage("assistant", text);
-    }
-  });
-
-  document.getElementById("voiceChatForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const input = document.getElementById("voiceChatInput");
-    const value = input.value.trim();
-    if (!value) {
+  document.getElementById("voiceActionChips").addEventListener("click", async (event) => {
+    const action = event.target?.dataset?.action;
+    if (!action) {
       return;
     }
-
-    addVoiceMessage("user", value);
-    const transcriptNode = document.getElementById("voiceTranscript");
-    transcriptNode.value = `${transcriptNode.value} ${value}`.trim();
-    voiceSession.finalTranscript = transcriptNode.value;
-    input.value = "";
-
     try {
-      await parseVoiceTranscript({ announce: false });
+      await handleVoiceAction(action);
     } catch (error) {
-      const text = normalizeApiError(error);
-      toast(text);
-      addVoiceMessage("assistant", text);
+      toast(normalizeApiError(error));
+      addVoiceMessage("assistant", normalizeApiError(error));
     }
   });
 }
