@@ -32,6 +32,7 @@ TASK_SELECT = (
     "SELECT id, title, note, status, priority, duration_min, deadline, list_id, "
     "sprint_id, sprint_direction_id, created_at, updated_at FROM tasks"
 )
+_ACTIVE_SPRINT_KEY = "active_sprint_id"
 
 
 def _validate_refs(
@@ -85,6 +86,34 @@ def _resolve_task_fields(candidate: dict, payload: VoiceTaskCreateRequest) -> tu
     )
 
 
+def _active_sprint_context(conn) -> dict:
+    row = conn.execute(
+        (
+            "SELECT s.id, s.name FROM app_settings cfg "
+            "JOIN sprints s ON s.id = cfg.value "
+            "WHERE cfg.key = ?"
+        ),
+        (_ACTIVE_SPRINT_KEY,),
+    ).fetchone()
+    context = row_to_dict(row)
+    if context is not None:
+        return context
+
+    stale = conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?", (_ACTIVE_SPRINT_KEY,)
+    ).fetchone()
+    if stale is not None:
+        conn.execute("DELETE FROM app_settings WHERE key = ?", (_ACTIVE_SPRINT_KEY,))
+    return {"id": None, "name": None}
+
+
+def _resolve_sprint_assignment(
+    conn, requested_sprint_id: str | None
+) -> tuple[str | None, dict]:
+    active = _active_sprint_context(conn)
+    return (requested_sprint_id or active["id"], active)
+
+
 @router.get("/capabilities", response_model=StubCapabilityOut)
 def voice_capabilities() -> StubCapabilityOut:
     runtime = provider_runtime_status()
@@ -101,12 +130,17 @@ def voice_capabilities() -> StubCapabilityOut:
 
 @router.post("/chat-turn", response_model=VoiceChatTurnOut)
 def chat_turn(payload: VoiceChatTurnRequest) -> VoiceChatTurnOut:
-    plan = chat_turn_plan(payload.message)
+    with get_connection() as conn:
+        active = _active_sprint_context(conn)
+
+    plan = chat_turn_plan(payload.message, active_sprint_name=active["name"])
     return VoiceChatTurnOut(
         provider=plan["provider"],
         model=plan["model"],
         intent=plan["intent"],
         assistant_reply=plan["assistant_reply"],
+        active_sprint_id=active["id"],
+        active_sprint_name=active["name"],
         tasks=plan["tasks"],
         actions=plan["actions"],
         error=plan["error"],
@@ -118,8 +152,11 @@ def confirm_tasks(payload: VoiceConfirmTasksRequest) -> VoiceConfirmTasksOut:
     created: list[dict] = []
 
     with get_connection() as conn:
+        resolved_sprint_id, _active = _resolve_sprint_assignment(
+            conn, payload.sprint_id
+        )
         _validate_refs(
-            conn, payload.list_id, payload.sprint_id, payload.sprint_direction_id
+            conn, payload.list_id, resolved_sprint_id, payload.sprint_direction_id
         )
 
         for candidate in payload.tasks:
@@ -148,7 +185,7 @@ def confirm_tasks(payload: VoiceConfirmTasksRequest) -> VoiceConfirmTasksOut:
                     resolved_duration,
                     resolved_deadline.isoformat() if resolved_deadline else None,
                     payload.list_id,
-                    payload.sprint_id,
+                    resolved_sprint_id,
                     payload.sprint_direction_id,
                     now,
                     now,
@@ -219,8 +256,11 @@ def create_task_from_voice(payload: VoiceTaskCreateRequest) -> dict:
     now = utc_now()
 
     with get_connection() as conn:
+        resolved_sprint_id, _active = _resolve_sprint_assignment(
+            conn, payload.sprint_id
+        )
         _validate_refs(
-            conn, payload.list_id, payload.sprint_id, payload.sprint_direction_id
+            conn, payload.list_id, resolved_sprint_id, payload.sprint_direction_id
         )
         conn.execute(
             (
@@ -237,7 +277,7 @@ def create_task_from_voice(payload: VoiceTaskCreateRequest) -> dict:
                 resolved_duration,
                 resolved_deadline.isoformat() if resolved_deadline else None,
                 payload.list_id,
-                payload.sprint_id,
+                resolved_sprint_id,
                 payload.sprint_direction_id,
                 now,
                 now,
@@ -256,8 +296,11 @@ def create_tasks_from_message(payload: VoiceCreateManyRequest) -> VoiceCreateMan
     created: list[dict] = []
 
     with get_connection() as conn:
+        resolved_sprint_id, _active = _resolve_sprint_assignment(
+            conn, payload.sprint_id
+        )
         _validate_refs(
-            conn, payload.list_id, payload.sprint_id, payload.sprint_direction_id
+            conn, payload.list_id, resolved_sprint_id, payload.sprint_direction_id
         )
 
         for candidate in result["tasks"]:
@@ -286,7 +329,7 @@ def create_tasks_from_message(payload: VoiceCreateManyRequest) -> VoiceCreateMan
                     resolved_duration,
                     resolved_deadline.isoformat() if resolved_deadline else None,
                     payload.list_id,
-                    payload.sprint_id,
+                    resolved_sprint_id,
                     payload.sprint_direction_id,
                     now,
                     now,

@@ -81,3 +81,44 @@ def test_analyze_and_create_multiple_tasks_from_one_message() -> None:
         assert create_many.status_code == 201
         data = create_many.json()
         assert data["created_count"] >= 1
+
+
+def test_confirm_tasks_uses_active_sprint_by_default() -> None:
+    with TestClient(app) as client:
+        list_response = client.post(
+            "/api/lists",
+            json={"name": "Active Voice", "color": "#2563eb"},
+        )
+        list_id = list_response.json()["id"]
+
+        sprint_response = client.post(
+            "/api/sprints",
+            json={
+                "name": "Focus Sprint",
+                "directions": ["Health", "Career", "Family", "Growth"],
+            },
+        )
+        sprint_id = sprint_response.json()["id"]
+
+        set_active = client.put("/api/sprints/active", json={"sprint_id": sprint_id})
+        assert set_active.status_code == 200
+
+        turn = client.post(
+            "/api/voice/chat-turn",
+            json={
+                "message": "Позвонить клиенту и проверить бюджет",
+                "list_id": list_id,
+            },
+        )
+        assert turn.status_code == 200
+        tasks = turn.json()["tasks"]
+        assert len(tasks) >= 1
+
+        confirm = client.post(
+            "/api/voice/confirm-tasks",
+            json={"list_id": list_id, "tasks": tasks},
+        )
+        assert confirm.status_code == 201
+        created = confirm.json()["tasks"]
+        assert len(created) >= 1
+        assert all(task["sprint_id"] == sprint_id for task in created)

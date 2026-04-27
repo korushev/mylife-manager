@@ -5,6 +5,8 @@ from fastapi import APIRouter, HTTPException
 from backend.app.database import get_connection, row_to_dict
 from backend.app.routers.utils import new_id, utc_now
 from backend.app.schemas import (
+    SprintActiveOut,
+    SprintActiveUpdate,
     SprintCreate,
     SprintDirectionOut,
     SprintDirectionUpdate,
@@ -13,6 +15,8 @@ from backend.app.schemas import (
 )
 
 router = APIRouter(prefix="/api/sprints", tags=["sprints"])
+
+_ACTIVE_SPRINT_KEY = "active_sprint_id"
 
 
 def _fetch_directions(conn, sprint_id: str) -> list[dict]:
@@ -38,6 +42,46 @@ def _fetch_sprint(conn, sprint_id: str) -> dict | None:
     return sprint
 
 
+def _get_active_sprint_id(conn) -> str | None:
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?", (_ACTIVE_SPRINT_KEY,)
+    ).fetchone()
+    if row is None:
+        return None
+    value = row["value"]
+    if value is None:
+        return None
+    return str(value).strip() or None
+
+
+def _set_active_sprint_id(conn, sprint_id: str | None) -> None:
+    if sprint_id is None:
+        conn.execute("DELETE FROM app_settings WHERE key = ?", (_ACTIVE_SPRINT_KEY,))
+        return
+
+    now = utc_now()
+    conn.execute(
+        (
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        ),
+        (_ACTIVE_SPRINT_KEY, sprint_id, now),
+    )
+
+
+def _active_payload(conn) -> dict:
+    sprint_id = _get_active_sprint_id(conn)
+    if sprint_id is None:
+        return {"sprint_id": None, "sprint": None}
+
+    sprint = _fetch_sprint(conn, sprint_id)
+    if sprint is None:
+        _set_active_sprint_id(conn, None)
+        return {"sprint_id": None, "sprint": None}
+
+    return {"sprint_id": sprint_id, "sprint": sprint}
+
+
 @router.get("", response_model=list[SprintOut])
 def list_sprints() -> list[dict]:
     with get_connection() as conn:
@@ -45,6 +89,27 @@ def list_sprints() -> list[dict]:
             "SELECT id FROM sprints ORDER BY created_at DESC"
         ).fetchall()
         return [_fetch_sprint(conn, row["id"]) for row in rows]
+
+
+@router.get("/active", response_model=SprintActiveOut)
+def get_active_sprint() -> dict:
+    with get_connection() as conn:
+        return _active_payload(conn)
+
+
+@router.put("/active", response_model=SprintActiveOut)
+def set_active_sprint(payload: SprintActiveUpdate) -> dict:
+    with get_connection() as conn:
+        sprint_id = payload.sprint_id
+        if sprint_id is not None:
+            exists = conn.execute(
+                "SELECT id FROM sprints WHERE id = ?", (sprint_id,)
+            ).fetchone()
+            if exists is None:
+                raise HTTPException(status_code=404, detail="Sprint not found")
+
+        _set_active_sprint_id(conn, sprint_id)
+        return _active_payload(conn)
 
 
 @router.post("", response_model=SprintOut, status_code=201)
@@ -115,9 +180,13 @@ def update_sprint(sprint_id: str, payload: SprintUpdate) -> dict:
 @router.delete("/{sprint_id}", status_code=200)
 def delete_sprint(sprint_id: str) -> None:
     with get_connection() as conn:
+        active_id = _get_active_sprint_id(conn)
         result = conn.execute("DELETE FROM sprints WHERE id = ?", (sprint_id,))
-    if result.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Sprint not found")
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Sprint not found")
+
+        if active_id == sprint_id:
+            _set_active_sprint_id(conn, None)
 
 
 @router.patch("/directions/{direction_id}", response_model=SprintDirectionOut)

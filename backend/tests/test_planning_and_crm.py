@@ -23,6 +23,16 @@ def test_tasks_sprints_calendar_and_crm_flow() -> None:
         sprint_id = sprint["id"]
         direction_id = sprint["directions"][0]["id"]
 
+        set_active_response = client.put(
+            "/api/sprints/active", json={"sprint_id": sprint_id}
+        )
+        assert set_active_response.status_code == 200
+        assert set_active_response.json()["sprint_id"] == sprint_id
+
+        get_active_response = client.get("/api/sprints/active")
+        assert get_active_response.status_code == 200
+        assert get_active_response.json()["sprint"]["id"] == sprint_id
+
         task_response = client.post(
             "/api/tasks",
             json={

@@ -86,6 +86,12 @@ CREATE TABLE IF NOT EXISTS crm_deals (
     FOREIGN KEY (linked_task_id) REFERENCES tasks(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS integration_configs (
     provider TEXT PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 0,

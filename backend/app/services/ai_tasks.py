@@ -225,13 +225,19 @@ def extract_tasks_from_message(message: str) -> dict[str, Any]:
         }
 
 
-def chat_turn_plan(message: str) -> dict[str, Any]:
+def chat_turn_plan(
+    message: str, active_sprint_name: str | None = None
+) -> dict[str, Any]:
     cfg = _provider_config()
     runtime = provider_runtime_status()
 
-    # Always extract structured tasks first (provider or fallback).
     extraction = extract_tasks_from_message(message)
     tasks = extraction["tasks"]
+    sprint_hint = (
+        f"Активный спринт: {active_sprint_name}. Новые задачи будут привязаны к нему."
+        if active_sprint_name
+        else "Активный спринт не выбран. Новые задачи попадут в общий inbox."
+    )
 
     api_key = cfg["api_key"]
     if not api_key:
@@ -247,9 +253,9 @@ def chat_turn_plan(message: str) -> dict[str, Any]:
             else [{"action": "continue_chat", "label": "Продолжить"}]
         )
         reply = (
-            f"Я выделил {len(tasks)} задач(и). Хочешь, сразу запишу их?"
+            f"Я выделил {len(tasks)} задач(и). {sprint_hint} Хочешь, сразу запишу их?"
             if has_tasks
-            else "Понял тебя. Могу помочь разложить задачи, сфокусироваться или ответить на вопрос."
+            else f"Понял тебя. {sprint_hint} Могу помочь разложить задачи, сфокусироваться или ответить на вопрос."
         )
         return {
             "provider": runtime["provider"] if runtime["configured"] else "fallback",
@@ -267,13 +273,14 @@ def chat_turn_plan(message: str) -> dict[str, Any]:
         "If tasks exist, propose concise friendly confirmation and quick actions. "
         "Return strict JSON only with shape: "
         '{"intent":string,"assistant_reply":string,"actions":[{"action":string,"label":string}]}. '
-        "Keep assistant_reply short and natural in Russian."
+        "Keep assistant_reply short and natural in Russian. Mention sprint focus in one short sentence."
     )
 
     payload = {
         "model": cfg["model"],
         "messages": [
             {"role": "system", "content": system_prompt},
+            {"role": "system", "content": f"Sprint context: {sprint_hint}"},
             {"role": "user", "content": message},
         ],
         "temperature": 0.3,
@@ -299,6 +306,7 @@ def chat_turn_plan(message: str) -> dict[str, Any]:
         assistant_reply = str(
             parsed.get("assistant_reply") or "Готов помочь. Продолжаем?"
         )
+        assistant_reply = f"{assistant_reply} {sprint_hint}"
 
         raw_actions = parsed.get("actions")
         actions: list[dict[str, str]] = []
@@ -336,9 +344,9 @@ def chat_turn_plan(message: str) -> dict[str, Any]:
             "model": None,
             "intent": "task_capture" if has_tasks else "question",
             "assistant_reply": (
-                f"Я выделил {len(tasks)} задач(и). Хочешь, сразу запишу их?"
+                f"Я выделил {len(tasks)} задач(и). {sprint_hint} Хочешь, сразу запишу их?"
                 if has_tasks
-                else "Я рядом. Опиши цель, и я помогу сфокусироваться."
+                else f"Я рядом. {sprint_hint} Опиши цель, и я помогу сфокусироваться."
             ),
             "tasks": tasks,
             "actions": (

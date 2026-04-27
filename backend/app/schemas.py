@@ -69,6 +69,15 @@ class SprintDirectionUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
 
+class SprintActiveUpdate(BaseModel):
+    sprint_id: str | None = None
+
+
+class SprintActiveOut(BaseModel):
+    sprint_id: str | None
+    sprint: SprintOut | None
+
+
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     note: str | None = None
@@ -300,6 +309,8 @@ class VoiceChatTurnOut(BaseModel):
     model: str | None
     intent: str
     assistant_reply: str
+    active_sprint_id: str | None = None
+    active_sprint_name: str | None = None
     tasks: list[VoiceTaskCandidateOut]
     actions: list[VoiceQuickActionOut]
     error: str | None

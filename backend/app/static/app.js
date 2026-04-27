@@ -3,6 +3,7 @@ const state = {
   tasks: [],
   sprints: [],
   timeBlocks: [],
+  activeSprint: null,
 };
 
 const TASK_STATUSES = ["inbox", "todo", "in_progress", "done"];
@@ -29,6 +30,20 @@ function addVoiceMessage(role, text) {
   item.textContent = text;
   log.appendChild(item);
   log.scrollTop = log.scrollHeight;
+}
+
+function renderVoiceSprintState() {
+  const node = document.getElementById("voiceSprintState");
+  if (!node) {
+    return;
+  }
+
+  if (state.activeSprint?.sprint) {
+    node.textContent = `Active sprint: ${state.activeSprint.sprint.name}`;
+    return;
+  }
+
+  node.textContent = "Active sprint: not selected (tasks go to inbox).";
 }
 
 function normalizeApiError(error) {
@@ -271,14 +286,36 @@ function renderSprints() {
       })
       .join("");
 
+    const isActive = state.activeSprint?.sprint_id === sprint.id;
+
     node.innerHTML = `
-      <h3>${sprint.name}</h3>
-      <div class="task-meta">${fromISO(sprint.start_date)} — ${fromISO(sprint.end_date)}</div>
+      <h3>${sprint.name}${isActive ? " (active)" : ""}</h3>
+      <div class="task-meta">${fromISO(sprint.start_date)} - ${fromISO(sprint.end_date)}</div>
+      <button class="button ghost" data-set-active-sprint="${sprint.id}" type="button">
+        ${isActive ? "Active now" : "Make Active"}
+      </button>
       ${directionsHtml}
     `;
     container.appendChild(node);
   });
+
+  container.querySelectorAll("[data-set-active-sprint]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      try {
+        const sprintId = event.currentTarget.dataset.setActiveSprint;
+        await api("/api/sprints/active", {
+          method: "PUT",
+          body: JSON.stringify({ sprint_id: sprintId }),
+        });
+        toast("Active sprint updated");
+        await refreshAll();
+      } catch (error) {
+        toast(normalizeApiError(error));
+      }
+    });
+  });
 }
+
 
 function renderCalendar() {
   const container = document.getElementById("calendarContainer");
@@ -339,6 +376,7 @@ async function refreshAll() {
   state.lists = await ensureDefaultList();
   state.tasks = await api("/api/tasks");
   state.sprints = await api("/api/sprints");
+  state.activeSprint = await api("/api/sprints/active");
   state.timeBlocks = await api("/api/calendar");
 
   syncSelects();
@@ -346,6 +384,7 @@ async function refreshAll() {
   renderTasks();
   renderKanban();
   renderSprints();
+  renderVoiceSprintState();
   renderCalendar();
   await renderStubsAndSettings();
 }
@@ -428,9 +467,14 @@ async function handleVoiceAction(action) {
       }),
     });
 
+    const assignedSprint = created.tasks?.[0]?.sprint_id;
+    const sprintNote = assignedSprint
+      ? " Привязал к активному спринту."
+      : " Сохранил в inbox без спринта.";
+
     addVoiceMessage(
       "assistant",
-      `Готово. Записал задач: ${created.created_count}.`
+      `Готово. Записал задач: ${created.created_count}.${sprintNote}`
     );
     document.getElementById("voicePreview").textContent = JSON.stringify(created, null, 2);
     voiceSession.parsed = null;
