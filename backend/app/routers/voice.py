@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException
 
 from backend.app.database import get_connection, row_to_dict
@@ -7,6 +9,8 @@ from backend.app.routers.utils import new_id, utc_now
 from backend.app.schemas import (
     StubCapabilityOut,
     TaskOut,
+    VoiceApplyActionOut,
+    VoiceApplyActionRequest,
     VoiceChatTurnOut,
     VoiceChatTurnRequest,
     VoiceConfirmTasksOut,
@@ -114,6 +118,64 @@ def _resolve_sprint_assignment(
     return (requested_sprint_id or active["id"], active)
 
 
+def _find_tasks_by_operation(
+    conn, operation: dict | None, list_id: str | None
+) -> list[dict]:
+    if operation is None:
+        return []
+
+    where: list[str] = []
+    params: list[str] = []
+
+    if list_id:
+        where.append("list_id = ?")
+        params.append(list_id)
+
+    text = operation.get("text")
+    if isinstance(text, str) and text.strip():
+        tokens = re.findall(r"[a-zA-Zа-яА-Я0-9]+", text.lower())
+        normalized = [token[:5] for token in tokens if len(token) >= 3][:6]
+        if normalized:
+            parts: list[str] = []
+            for token in normalized:
+                parts.append(
+                    "("
+                    "title LIKE ? OR COALESCE(note, '') LIKE ? "
+                    "OR title LIKE ? OR COALESCE(note, '') LIKE ?"
+                    ")"
+                )
+                lower_like = f"%{token}%"
+                upper_like = f"%{token[:1].upper()}{token[1:]}%"
+                params.append(lower_like)
+                params.append(lower_like)
+                params.append(upper_like)
+                params.append(upper_like)
+            where.append("(" + " OR ".join(parts) + ")")
+
+    status = operation.get("status")
+    if status in {"inbox", "todo", "in_progress", "done"}:
+        where.append("status = ?")
+        params.append(status)
+
+    if operation.get("without_deadline"):
+        where.append("deadline IS NULL")
+
+    sql = TASK_SELECT
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at DESC"
+
+    limit = operation.get("limit") or 10
+    try:
+        safe_limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        safe_limit = 10
+    sql += f" LIMIT {safe_limit}"
+
+    rows = conn.execute(sql, tuple(params)).fetchall()
+    return [row_to_dict(row) for row in rows]
+
+
 @router.get("/capabilities", response_model=StubCapabilityOut)
 def voice_capabilities() -> StubCapabilityOut:
     runtime = provider_runtime_status()
@@ -143,8 +205,64 @@ def chat_turn(payload: VoiceChatTurnRequest) -> VoiceChatTurnOut:
         active_sprint_name=active["name"],
         tasks=plan["tasks"],
         actions=plan["actions"],
+        operation=plan.get("operation"),
         error=plan["error"],
     )
+
+
+@router.post("/apply-action", response_model=VoiceApplyActionOut)
+def apply_action(payload: VoiceApplyActionRequest) -> VoiceApplyActionOut:
+    action = payload.action
+    operation = payload.operation.model_dump() if payload.operation else None
+
+    with get_connection() as conn:
+        matched = _find_tasks_by_operation(conn, operation, payload.list_id)
+        if action == "run_query":
+            return VoiceApplyActionOut(
+                action=action,
+                affected_count=len(matched),
+                tasks=matched,
+                assistant_reply=f"Нашел задач: {len(matched)}.",
+                preview_only=True,
+            )
+
+        if action == "confirm_delete":
+            for task in matched:
+                conn.execute("DELETE FROM tasks WHERE id = ?", (task["id"],))
+            return VoiceApplyActionOut(
+                action=action,
+                affected_count=len(matched),
+                tasks=[],
+                assistant_reply=f"Удалил задач: {len(matched)}.",
+                preview_only=False,
+            )
+
+        if action == "confirm_update_status":
+            if operation is None or operation.get("new_status") not in {
+                "inbox",
+                "todo",
+                "in_progress",
+                "done",
+            }:
+                raise HTTPException(
+                    status_code=400, detail="new_status is required for update_status"
+                )
+            new_status = operation["new_status"]
+            for task in matched:
+                conn.execute(
+                    "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+                    (new_status, utc_now(), task["id"]),
+                )
+            updated = _find_tasks_by_operation(conn, operation, payload.list_id)
+            return VoiceApplyActionOut(
+                action=action,
+                affected_count=len(matched),
+                tasks=updated,
+                assistant_reply=f"Обновил статус у задач: {len(matched)}.",
+                preview_only=False,
+            )
+
+    raise HTTPException(status_code=400, detail="Unsupported action")
 
 
 @router.post("/confirm-tasks", response_model=VoiceConfirmTasksOut, status_code=201)

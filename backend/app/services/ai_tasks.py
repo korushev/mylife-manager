@@ -156,6 +156,90 @@ def _fallback_tasks(message: str) -> list[dict[str, Any]]:
     return tasks
 
 
+def _fallback_operation(message: str) -> dict[str, Any] | None:
+    text = message.lower()
+
+    is_query = any(
+        phrase in text
+        for phrase in (
+            "покажи",
+            "выведи",
+            "какие задачи",
+            "what tasks",
+            "show tasks",
+            "список задач",
+        )
+    )
+    is_delete = any(
+        phrase in text for phrase in ("удали", "remove", "delete", "убери задачу")
+    )
+    is_update = any(
+        phrase in text
+        for phrase in (
+            "переведи в done",
+            "отметь выполн",
+            "mark as done",
+            "выполнено",
+            "сделай done",
+            "статус",
+        )
+    )
+
+    if not any((is_query, is_delete, is_update)):
+        return None
+
+    without_deadline = any(
+        phrase in text
+        for phrase in ("без даты", "без дедлайна", "no deadline", "without deadline")
+    )
+
+    status: str | None = None
+    for value in ("inbox", "todo", "in_progress", "done"):
+        if value in text:
+            status = value
+            break
+
+    task_text = None
+    marker_variants = ("связанные с", "про", "about", "related to")
+    for marker in marker_variants:
+        index = text.find(marker)
+        if index != -1:
+            task_text = message[index + len(marker) :].strip(" .,:;!?")
+            break
+
+    if is_delete:
+        return {
+            "type": "delete",
+            "text": task_text,
+            "status": status,
+            "without_deadline": without_deadline,
+            "new_status": None,
+            "limit": 20,
+        }
+
+    if is_update:
+        new_status = "done" if "done" in text or "выполн" in text else status
+        if new_status is None:
+            new_status = "todo"
+        return {
+            "type": "update_status",
+            "text": task_text,
+            "status": status,
+            "without_deadline": without_deadline,
+            "new_status": new_status,
+            "limit": 20,
+        }
+
+    return {
+        "type": "query",
+        "text": task_text,
+        "status": status,
+        "without_deadline": without_deadline,
+        "new_status": None,
+        "limit": 20,
+    }
+
+
 def extract_tasks_from_message(message: str) -> dict[str, Any]:
     cfg = _provider_config()
     api_key = cfg["api_key"]
@@ -230,8 +314,18 @@ def chat_turn_plan(
 ) -> dict[str, Any]:
     cfg = _provider_config()
     runtime = provider_runtime_status()
+    operation = _fallback_operation(message)
 
-    extraction = extract_tasks_from_message(message)
+    extraction = (
+        {
+            "provider": runtime["provider"] if runtime["configured"] else "fallback",
+            "model": runtime["model"] if runtime["configured"] else None,
+            "tasks": [],
+            "error": None,
+        }
+        if operation is not None
+        else extract_tasks_from_message(message)
+    )
     tasks = extraction["tasks"]
     sprint_hint = (
         f"Активный спринт: {active_sprint_name}. Новые задачи будут привязаны к нему."
@@ -241,6 +335,53 @@ def chat_turn_plan(
 
     api_key = cfg["api_key"]
     if not api_key:
+        if operation is not None:
+            operation_type = operation["type"]
+            if operation_type == "query":
+                return {
+                    "provider": "fallback",
+                    "model": None,
+                    "intent": "task_query",
+                    "assistant_reply": (
+                        f"Понял. Могу показать подходящие задачи. {sprint_hint}"
+                    ),
+                    "tasks": [],
+                    "actions": [{"action": "run_query", "label": "Показать задачи"}],
+                    "operation": operation,
+                    "error": extraction["error"],
+                }
+            if operation_type == "delete":
+                return {
+                    "provider": "fallback",
+                    "model": None,
+                    "intent": "task_delete",
+                    "assistant_reply": (
+                        "Понял. Могу удалить подходящие задачи после подтверждения."
+                    ),
+                    "tasks": [],
+                    "actions": [
+                        {"action": "confirm_delete", "label": "Удалить задачи"},
+                        {"action": "skip_tasks", "label": "Отмена"},
+                    ],
+                    "operation": operation,
+                    "error": extraction["error"],
+                }
+            return {
+                "provider": "fallback",
+                "model": None,
+                "intent": "task_update",
+                "assistant_reply": (
+                    "Понял. Могу обновить статус подходящих задач после подтверждения."
+                ),
+                "tasks": [],
+                "actions": [
+                    {"action": "confirm_update_status", "label": "Обновить статус"},
+                    {"action": "skip_tasks", "label": "Отмена"},
+                ],
+                "operation": operation,
+                "error": extraction["error"],
+            }
+
         has_tasks = len(tasks) > 0
         intent = "task_capture" if has_tasks else "question"
         actions = (
@@ -264,15 +405,23 @@ def chat_turn_plan(
             "assistant_reply": reply,
             "tasks": tasks,
             "actions": actions,
+            "operation": None,
             "error": extraction["error"],
         }
 
     system_prompt = (
         "You are a helpful planning copilot. "
-        "Classify user message intent into: task_capture, question, coaching, mixed. "
-        "If tasks exist, propose concise friendly confirmation and quick actions. "
+        "Classify user message intent into: task_capture, task_query, "
+        "task_delete, task_update, question, coaching, mixed. "
+        "If user asks to list/filter tasks, set operation.type=query. "
+        "If user asks to delete tasks, set operation.type=delete. "
+        "If user asks to change status of tasks, set operation.type=update_status with new_status. "
+        "If tasks for creating are present, propose concise friendly confirmation and quick actions. "
         "Return strict JSON only with shape: "
-        '{"intent":string,"assistant_reply":string,"actions":[{"action":string,"label":string}]}. '
+        '{"intent":string,"assistant_reply":string,"actions":[{"action":string,"label":string}],'
+        '"operation":{"type":"query"|"delete"|"update_status","text":string|null,'
+        '"status":"inbox"|"todo"|"in_progress"|"done"|null,"without_deadline":boolean,'
+        '"new_status":"inbox"|"todo"|"in_progress"|"done"|null,"limit":number}|null}. '
         "Keep assistant_reply short and natural in Russian. Mention sprint focus in one short sentence."
     )
 
@@ -319,7 +468,21 @@ def chat_turn_plan(
                 actions.append({"action": action, "label": label})
 
         if not actions:
-            if tasks:
+            if parsed.get("operation"):
+                op_type = parsed["operation"].get("type")
+                if op_type == "query":
+                    actions = [{"action": "run_query", "label": "Показать задачи"}]
+                elif op_type == "delete":
+                    actions = [
+                        {"action": "confirm_delete", "label": "Удалить задачи"},
+                        {"action": "skip_tasks", "label": "Отмена"},
+                    ]
+                elif op_type == "update_status":
+                    actions = [
+                        {"action": "confirm_update_status", "label": "Обновить статус"},
+                        {"action": "skip_tasks", "label": "Отмена"},
+                    ]
+            elif tasks:
                 actions = [
                     {"action": "save_tasks", "label": "Записать задачи"},
                     {"action": "edit_tasks", "label": "Исправить"},
@@ -328,6 +491,21 @@ def chat_turn_plan(
             else:
                 actions = [{"action": "continue_chat", "label": "Продолжить"}]
 
+        parsed_operation = parsed.get("operation")
+        if not isinstance(parsed_operation, dict):
+            parsed_operation = operation
+        if isinstance(parsed_operation, dict):
+            parsed_operation = {
+                "type": parsed_operation.get("type"),
+                "text": parsed_operation.get("text"),
+                "status": parsed_operation.get("status"),
+                "without_deadline": bool(parsed_operation.get("without_deadline")),
+                "new_status": parsed_operation.get("new_status"),
+                "limit": int(parsed_operation.get("limit") or 10),
+            }
+            if parsed_operation["type"] not in {"query", "delete", "update_status"}:
+                parsed_operation = None
+
         return {
             "provider": extraction["provider"],
             "model": extraction["model"],
@@ -335,9 +513,38 @@ def chat_turn_plan(
             "assistant_reply": assistant_reply,
             "tasks": tasks,
             "actions": actions,
+            "operation": parsed_operation,
             "error": extraction["error"],
         }
     except Exception as exc:  # noqa: BLE001
+        if operation is not None:
+            op_type = operation["type"]
+            actions = [{"action": "run_query", "label": "Показать задачи"}]
+            if op_type == "delete":
+                actions = [
+                    {"action": "confirm_delete", "label": "Удалить задачи"},
+                    {"action": "skip_tasks", "label": "Отмена"},
+                ]
+            elif op_type == "update_status":
+                actions = [
+                    {"action": "confirm_update_status", "label": "Обновить статус"},
+                    {"action": "skip_tasks", "label": "Отмена"},
+                ]
+            return {
+                "provider": "fallback",
+                "model": None,
+                "intent": (
+                    "task_query"
+                    if op_type == "query"
+                    else ("task_delete" if op_type == "delete" else "task_update")
+                ),
+                "assistant_reply": f"Могу это сделать. {sprint_hint}",
+                "tasks": [],
+                "actions": actions,
+                "operation": operation,
+                "error": f"Chat plan provider failed: {exc}",
+            }
+
         has_tasks = len(tasks) > 0
         return {
             "provider": "fallback",
@@ -358,5 +565,6 @@ def chat_turn_plan(
                 if has_tasks
                 else [{"action": "continue_chat", "label": "Продолжить"}]
             ),
+            "operation": None,
             "error": f"Chat plan provider failed: {exc}",
         }

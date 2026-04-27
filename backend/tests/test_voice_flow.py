@@ -122,3 +122,107 @@ def test_confirm_tasks_uses_active_sprint_by_default() -> None:
         created = confirm.json()["tasks"]
         assert len(created) >= 1
         assert all(task["sprint_id"] == sprint_id for task in created)
+
+
+def test_voice_chat_can_query_and_update_and_delete_tasks() -> None:
+    with TestClient(app) as client:
+        list_response = client.post(
+            "/api/lists",
+            json={"name": "Voice Ops", "color": "#0284c7"},
+        )
+        list_id = list_response.json()["id"]
+
+        created_1 = client.post(
+            "/api/tasks",
+            json={
+                "title": "Финансы: проверить бюджет",
+                "status": "todo",
+                "priority": "medium",
+                "duration_min": 30,
+                "list_id": list_id,
+            },
+        )
+        assert created_1.status_code == 201
+
+        created_2 = client.post(
+            "/api/tasks",
+            json={
+                "title": "Финансы: оплатить налог",
+                "status": "todo",
+                "priority": "high",
+                "duration_min": 20,
+                "list_id": list_id,
+            },
+        )
+        assert created_2.status_code == 201
+
+        turn_query = client.post(
+            "/api/voice/chat-turn",
+            json={
+                "message": "Покажи задачи связанные с финансами",
+                "list_id": list_id,
+            },
+        )
+        assert turn_query.status_code == 200
+        plan_query = turn_query.json()
+        assert any(action["action"] == "run_query" for action in plan_query["actions"])
+
+        run_query = client.post(
+            "/api/voice/apply-action",
+            json={
+                "action": "run_query",
+                "operation": plan_query["operation"],
+                "list_id": list_id,
+            },
+        )
+        assert run_query.status_code == 200
+        assert run_query.json()["affected_count"] >= 2
+
+        turn_update = client.post(
+            "/api/voice/chat-turn",
+            json={
+                "message": "Отметь выполненными задачи связанные с финансами",
+                "list_id": list_id,
+            },
+        )
+        assert turn_update.status_code == 200
+        plan_update = turn_update.json()
+        assert any(
+            action["action"] == "confirm_update_status"
+            for action in plan_update["actions"]
+        )
+
+        run_update = client.post(
+            "/api/voice/apply-action",
+            json={
+                "action": "confirm_update_status",
+                "operation": plan_update["operation"],
+                "list_id": list_id,
+            },
+        )
+        assert run_update.status_code == 200
+        assert run_update.json()["affected_count"] >= 2
+
+        turn_delete = client.post(
+            "/api/voice/chat-turn",
+            json={
+                "message": "Удали задачи связанные с финансами",
+                "list_id": list_id,
+            },
+        )
+        assert turn_delete.status_code == 200
+        plan_delete = turn_delete.json()
+        assert any(
+            action["action"] == "confirm_delete" for action in plan_delete["actions"]
+        )
+
+        run_delete = client.post(
+            "/api/voice/apply-action",
+            json={
+                "action": "confirm_delete",
+                "operation": plan_delete["operation"],
+                "list_id": list_id,
+            },
+        )
+        assert run_delete.status_code == 200
+        assert run_delete.json()["affected_count"] >= 2

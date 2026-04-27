@@ -483,6 +483,33 @@ async function handleVoiceAction(action) {
     return;
   }
 
+  if (action === "run_query" || action === "confirm_delete" || action === "confirm_update_status") {
+    const result = await api("/api/voice/apply-action", {
+      method: "POST",
+      body: JSON.stringify({
+        action,
+        operation: voiceSession.parsed?.operation || null,
+        list_id: document.getElementById("voiceListSelect").value || null,
+      }),
+    });
+
+    addVoiceMessage("assistant", result.assistant_reply);
+
+    if (result.tasks?.length) {
+      const lines = result.tasks
+        .slice(0, 8)
+        .map((task) => `• ${task.title} [${task.status}]`)
+        .join("\n");
+      addVoiceMessage("assistant", `Список:\n${lines}`);
+    }
+
+    document.getElementById("voicePreview").textContent = JSON.stringify(result, null, 2);
+    voiceSession.parsed = null;
+    renderVoiceActions([]);
+    await refreshAll();
+    return;
+  }
+
   if (action === "skip_tasks") {
     addVoiceMessage("assistant", "Ок, не записываю. Чем еще помочь?");
     voiceSession.parsed = null;

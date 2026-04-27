@@ -299,6 +299,15 @@ class VoiceQuickActionOut(BaseModel):
     label: str
 
 
+class VoiceOperationOut(BaseModel):
+    type: Literal["query", "delete", "update_status"]
+    text: str | None = None
+    status: TaskStatus | None = None
+    without_deadline: bool = False
+    new_status: TaskStatus | None = None
+    limit: int = Field(default=10, ge=1, le=50)
+
+
 class VoiceChatTurnRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     list_id: str | None = None
@@ -313,6 +322,7 @@ class VoiceChatTurnOut(BaseModel):
     active_sprint_name: str | None = None
     tasks: list[VoiceTaskCandidateOut]
     actions: list[VoiceQuickActionOut]
+    operation: VoiceOperationOut | None = None
     error: str | None
 
 
@@ -328,3 +338,17 @@ class VoiceConfirmTasksOut(BaseModel):
     model: str | None
     created_count: int
     tasks: list[TaskOut]
+
+
+class VoiceApplyActionRequest(BaseModel):
+    action: str
+    operation: VoiceOperationOut | None = None
+    list_id: str | None = None
+
+
+class VoiceApplyActionOut(BaseModel):
+    action: str
+    affected_count: int
+    tasks: list[TaskOut]
+    assistant_reply: str
+    preview_only: bool
