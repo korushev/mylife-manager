@@ -361,39 +361,40 @@ function getRecognitionClass() {
 async function parseVoiceTranscript({ announce = true } = {}) {
   const transcriptNode = document.getElementById("voiceTranscript");
   const previewNode = document.getElementById("voicePreview");
-  const transcript = transcriptNode.value.trim();
+  const message = transcriptNode.value.trim();
 
-  if (!transcript) {
+  if (!message) {
     toast("Transcript is empty");
     return null;
   }
 
   const listId = document.getElementById("voiceListSelect").value || null;
-  const parsed = await api("/api/voice/parse-task", {
+  const analyzed = await api("/api/voice/analyze-message", {
     method: "POST",
-    body: JSON.stringify({ transcript, list_id: listId }),
+    body: JSON.stringify({ message, list_id: listId }),
   });
 
-  voiceSession.parsed = parsed;
-  previewNode.textContent = JSON.stringify(parsed, null, 2);
+  voiceSession.parsed = analyzed;
+  previewNode.textContent = JSON.stringify(analyzed, null, 2);
 
+  const count = analyzed.tasks?.length || 0;
   if (announce) {
-    addVoiceMessage("assistant", `Понял задачу: ${parsed.title}`);
+    addVoiceMessage("assistant", `Понял  задач(и).`);
   }
 
-  if (parsed.requires_clarification) {
-    addVoiceMessage(
-      "assistant",
-      parsed.next_question || "Нужны уточнения перед сохранением задачи."
-    );
+  if (!analyzed.tasks || analyzed.tasks.length === 0) {
+    addVoiceMessage("assistant", "Не смог выделить задачи. Попробуй переформулировать.");
+    return analyzed;
+  }
+
+  const hasMissing = analyzed.tasks.some((task) => task.requires_clarification);
+  if (hasMissing) {
+    addVoiceMessage("assistant", "Есть задачи с недостающими полями. Сохраню с дефолтами.");
   } else {
-    addVoiceMessage(
-      "assistant",
-      "Все поля на месте. Можно нажать Create Task и сохранить задачу."
-    );
+    addVoiceMessage("assistant", "Все поля на месте. Можно сохранить все задачи.");
   }
 
-  return parsed;
+  return analyzed;
 }
 
 function bindVoice() {
@@ -467,37 +468,29 @@ function bindVoice() {
 
   document.getElementById("voiceCreateBtn").addEventListener("click", async () => {
     try {
-      const parsed = voiceSession.parsed || (await parseVoiceTranscript({ announce: false }));
-      if (!parsed) {
+      const analyzed = voiceSession.parsed || (await parseVoiceTranscript({ announce: false }));
+      if (!analyzed) {
         return;
       }
-      if (parsed.requires_clarification) {
-        addVoiceMessage(
-          "assistant",
-          "Сохраняю задачу с дефолтами, но рекомендую уточнить детали позже."
-        );
+
+      if (analyzed.tasks?.some((task) => task.requires_clarification)) {
+        addVoiceMessage("assistant", "Сохраняю задачи с дефолтами для недостающих полей.");
       }
 
-      const task = await api("/api/voice/create-task", {
+      const created = await api("/api/voice/create-tasks-from-message", {
         method: "POST",
         body: JSON.stringify({
-          transcript: document.getElementById("voiceTranscript").value.trim(),
+          message: document.getElementById("voiceTranscript").value.trim(),
           list_id: document.getElementById("voiceListSelect").value,
-          title: parsed.title,
-          note: parsed.note,
-          status: parsed.status,
-          priority: parsed.priority,
-          duration_min: parsed.duration_min,
-          deadline: parsed.deadline,
         }),
       });
 
-      document.getElementById("voicePreview").textContent = JSON.stringify(task, null, 2);
-      addVoiceMessage("assistant", "Готово. Задача сохранена.");
+      document.getElementById("voicePreview").textContent = JSON.stringify(created, null, 2);
+      addVoiceMessage("assistant", `Готово. Сохранено задач: .`);
       document.getElementById("voiceTranscript").value = "";
       voiceSession.finalTranscript = "";
       voiceSession.parsed = null;
-      toast("Task created from voice");
+      toast("Tasks created from voice");
       await refreshAll();
     } catch (error) {
       const text = normalizeApiError(error);
