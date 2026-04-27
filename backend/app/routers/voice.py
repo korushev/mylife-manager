@@ -15,7 +15,10 @@ from backend.app.schemas import (
     VoiceTaskParseOut,
     VoiceTaskParseRequest,
 )
-from backend.app.services.ai_tasks import extract_tasks_from_message
+from backend.app.services.ai_tasks import (
+    extract_tasks_from_message,
+    provider_runtime_status,
+)
 from backend.app.services.voice_tasks import parse_voice_task
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
@@ -79,12 +82,14 @@ def _resolve_task_fields(candidate: dict, payload: VoiceTaskCreateRequest) -> tu
 
 @router.get("/capabilities", response_model=StubCapabilityOut)
 def voice_capabilities() -> StubCapabilityOut:
+    runtime = provider_runtime_status()
+    mode = "configured" if runtime["configured"] else "not_configured"
     return StubCapabilityOut(
         module="voice",
         status="available",
         message=(
-            "Voice can parse one message into multiple tasks via DeepSeek/OpenAI/fallback "
-            "and create tasks even when details are partial."
+            f"AI provider={runtime['provider']} ({mode}), model={runtime['model']}. "
+            "Use analyze-message for LLM parsing; fallback only if provider is unavailable."
         ),
     )
 

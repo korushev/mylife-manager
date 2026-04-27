@@ -379,11 +379,14 @@ async function parseVoiceTranscript({ announce = true } = {}) {
 
   const count = analyzed.tasks?.length || 0;
   if (announce) {
-    addVoiceMessage("assistant", `Понял  задач(и).`);
+    addVoiceMessage("assistant", `Понял ${count} задач(и). Источник: ${analyzed.provider}${analyzed.model ? ` (${analyzed.model})` : ""}.`);
   }
 
   if (!analyzed.tasks || analyzed.tasks.length === 0) {
     addVoiceMessage("assistant", "Не смог выделить задачи. Попробуй переформулировать.");
+    if (analyzed.error) {
+      addVoiceMessage("assistant", `Причина fallback: ${analyzed.error}`);
+    }
     return analyzed;
   }
 
@@ -392,6 +395,10 @@ async function parseVoiceTranscript({ announce = true } = {}) {
     addVoiceMessage("assistant", "Есть задачи с недостающими полями. Сохраню с дефолтами.");
   } else {
     addVoiceMessage("assistant", "Все поля на месте. Можно сохранить все задачи.");
+  }
+
+  if (analyzed.error) {
+    addVoiceMessage("assistant", `Внимание: DeepSeek не ответил, включен fallback. Причина: ${analyzed.error}`);
   }
 
   return analyzed;
@@ -486,10 +493,13 @@ function bindVoice() {
       });
 
       document.getElementById("voicePreview").textContent = JSON.stringify(created, null, 2);
-      addVoiceMessage("assistant", `Готово. Сохранено задач: .`);
+      addVoiceMessage("assistant", `Готово. Сохранено задач: ${created.created_count}. Источник: ${created.provider}${created.model ? ` (${created.model})` : ""}.`);
       document.getElementById("voiceTranscript").value = "";
       voiceSession.finalTranscript = "";
       voiceSession.parsed = null;
+      if (created.error) {
+        addVoiceMessage("assistant", `Причина fallback: ${created.error}`);
+      }
       toast("Tasks created from voice");
       await refreshAll();
     } catch (error) {
