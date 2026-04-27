@@ -216,12 +216,25 @@ def test_voice_chat_can_query_and_update_and_delete_tasks() -> None:
             action["action"] == "confirm_delete" for action in plan_delete["actions"]
         )
 
+        preview_delete = client.post(
+            "/api/voice/apply-action",
+            json={
+                "action": "run_query",
+                "operation": plan_delete["operation"],
+                "list_id": list_id,
+            },
+        )
+        assert preview_delete.status_code == 200
+        delete_ids = [task["id"] for task in preview_delete.json()["tasks"]]
+        assert len(delete_ids) >= 2
+
         run_delete = client.post(
             "/api/voice/apply-action",
             json={
                 "action": "confirm_delete",
                 "operation": plan_delete["operation"],
                 "list_id": list_id,
+                "task_ids": delete_ids,
             },
         )
         assert run_delete.status_code == 200

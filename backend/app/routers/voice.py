@@ -227,13 +227,27 @@ def apply_action(payload: VoiceApplyActionRequest) -> VoiceApplyActionOut:
             )
 
         if action == "confirm_delete":
-            for task in matched:
-                conn.execute("DELETE FROM tasks WHERE id = ?", (task["id"],))
+            if payload.task_ids:
+                target_ids = [task_id for task_id in payload.task_ids if task_id]
+            else:
+                target_ids = [task["id"] for task in matched]
+
+            deleted_count = 0
+            for task_id in target_ids:
+                if payload.list_id:
+                    result = conn.execute(
+                        "DELETE FROM tasks WHERE id = ? AND list_id = ?",
+                        (task_id, payload.list_id),
+                    )
+                else:
+                    result = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+                deleted_count += result.rowcount
+
             return VoiceApplyActionOut(
                 action=action,
-                affected_count=len(matched),
+                affected_count=deleted_count,
                 tasks=[],
-                assistant_reply=f"Удалил задач: {len(matched)}.",
+                assistant_reply=f"Удалил задач: {deleted_count}.",
                 preview_only=False,
             )
 

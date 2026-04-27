@@ -11,6 +11,7 @@ const TASK_STATUSES = ["inbox", "todo", "in_progress", "done"];
 const voiceSession = {
   parsed: null,
   finalTranscript: "",
+  pendingDeleteTaskIds: [],
 };
 
 let recognition = null;
@@ -419,6 +420,7 @@ async function parseVoiceTranscript({ announce = true } = {}) {
   });
 
   voiceSession.parsed = plan;
+  voiceSession.pendingDeleteTaskIds = [];
   previewNode.textContent = JSON.stringify(plan, null, 2);
 
   addVoiceMessage(
@@ -484,6 +486,38 @@ async function handleVoiceAction(action) {
   }
 
   if (action === "run_query" || action === "confirm_delete" || action === "confirm_update_status") {
+    if (action === "confirm_delete") {
+      const preview = await api("/api/voice/apply-action", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run_query",
+          operation: voiceSession.parsed?.operation || null,
+          list_id: document.getElementById("voiceListSelect").value || null,
+        }),
+      });
+
+      document.getElementById("voicePreview").textContent = JSON.stringify(preview, null, 2);
+      const ids = (preview.tasks || []).map((task) => task.id);
+      voiceSession.pendingDeleteTaskIds = ids;
+
+      if (!ids.length) {
+        addVoiceMessage("assistant", "Под удаление ничего не нашел. Уточни запрос.");
+        voiceSession.parsed = null;
+        renderVoiceActions([]);
+        return;
+      }
+
+      addVoiceMessage(
+        "assistant",
+        `Нашел для удаления: ${ids.length}. Подтверди финальное удаление.`
+      );
+      renderVoiceActions([
+        { action: "final_delete", label: "Подтверждаю удаление" },
+        { action: "skip_tasks", label: "Отмена" },
+      ]);
+      return;
+    }
+
     const result = await api("/api/voice/apply-action", {
       method: "POST",
       body: JSON.stringify({
@@ -510,8 +544,28 @@ async function handleVoiceAction(action) {
     return;
   }
 
+  if (action === "final_delete") {
+    const result = await api("/api/voice/apply-action", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "confirm_delete",
+        operation: voiceSession.parsed?.operation || null,
+        list_id: document.getElementById("voiceListSelect").value || null,
+        task_ids: voiceSession.pendingDeleteTaskIds || [],
+      }),
+    });
+    addVoiceMessage("assistant", result.assistant_reply);
+    document.getElementById("voicePreview").textContent = JSON.stringify(result, null, 2);
+    voiceSession.pendingDeleteTaskIds = [];
+    voiceSession.parsed = null;
+    renderVoiceActions([]);
+    await refreshAll();
+    return;
+  }
+
   if (action === "skip_tasks") {
     addVoiceMessage("assistant", "Ок, не записываю. Чем еще помочь?");
+    voiceSession.pendingDeleteTaskIds = [];
     voiceSession.parsed = null;
     renderVoiceActions([]);
     return;

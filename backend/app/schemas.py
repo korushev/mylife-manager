@@ -344,6 +344,7 @@ class VoiceApplyActionRequest(BaseModel):
     action: str
     operation: VoiceOperationOut | None = None
     list_id: str | None = None
+    task_ids: list[str] | None = None
 
 
 class VoiceApplyActionOut(BaseModel):
