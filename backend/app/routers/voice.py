@@ -7,6 +7,9 @@ from fastapi import APIRouter, HTTPException
 from backend.app.database import get_connection, row_to_dict
 from backend.app.routers.utils import new_id, utc_now
 from backend.app.schemas import (
+    ChatHistoryConfigOut,
+    ChatHistoryConfigUpdate,
+    ChatHistoryMessageOut,
     StubCapabilityOut,
     TaskOut,
     VoiceApplyActionOut,
@@ -37,6 +40,8 @@ TASK_SELECT = (
     "sprint_id, sprint_direction_id, created_at, updated_at FROM tasks"
 )
 _ACTIVE_SPRINT_KEY = "active_sprint_id"
+_CHAT_HISTORY_ENABLED_KEY = "chat_history_enabled"
+_CHAT_HISTORY_RETENTION_KEY = "chat_history_retention_days"
 
 
 def _validate_refs(
@@ -116,6 +121,77 @@ def _resolve_sprint_assignment(
 ) -> tuple[str | None, dict]:
     active = _active_sprint_context(conn)
     return (requested_sprint_id or active["id"], active)
+
+
+def _get_chat_history_config(conn) -> dict:
+    enabled_row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?", (_CHAT_HISTORY_ENABLED_KEY,)
+    ).fetchone()
+    retention_row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?", (_CHAT_HISTORY_RETENTION_KEY,)
+    ).fetchone()
+
+    enabled = True
+    if enabled_row is not None:
+        enabled = str(enabled_row["value"]).strip() not in {"0", "false", "False"}
+
+    retention_days = 30
+    if retention_row is not None:
+        try:
+            retention_days = max(1, min(int(retention_row["value"]), 365))
+        except (TypeError, ValueError):
+            retention_days = 30
+
+    return {"enabled": enabled, "retention_days": retention_days}
+
+
+def _set_chat_history_config(conn, enabled: bool, retention_days: int) -> dict:
+    now = utc_now()
+    conn.execute(
+        (
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        ),
+        (_CHAT_HISTORY_ENABLED_KEY, "1" if enabled else "0", now),
+    )
+    conn.execute(
+        (
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        ),
+        (_CHAT_HISTORY_RETENTION_KEY, str(retention_days), now),
+    )
+    return {"enabled": enabled, "retention_days": retention_days}
+
+
+def _purge_old_chat_messages(conn, retention_days: int) -> None:
+    conn.execute(
+        "DELETE FROM chat_messages WHERE datetime(created_at) < datetime('now', ?)",
+        (f"-{retention_days} days",),
+    )
+
+
+def _log_chat_message(
+    conn,
+    *,
+    role: str,
+    content: str,
+    intent: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> None:
+    cfg = _get_chat_history_config(conn)
+    if not cfg["enabled"]:
+        return
+
+    _purge_old_chat_messages(conn, cfg["retention_days"])
+    conn.execute(
+        (
+            "INSERT INTO chat_messages (id, role, content, intent, provider, model, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ),
+        (new_id(), role, content, intent, provider, model, utc_now()),
+    )
 
 
 def _find_tasks_by_operation(
@@ -202,6 +278,20 @@ def chat_turn(payload: VoiceChatTurnRequest) -> VoiceChatTurnOut:
         active = _active_sprint_context(conn)
 
     plan = chat_turn_plan(payload.message, active_sprint_name=active["name"])
+    with get_connection() as conn:
+        _log_chat_message(
+            conn,
+            role="user",
+            content=payload.message,
+        )
+        _log_chat_message(
+            conn,
+            role="assistant",
+            content=plan["assistant_reply"],
+            intent=plan["intent"],
+            provider=plan["provider"],
+            model=plan["model"],
+        )
     return VoiceChatTurnOut(
         provider=plan["provider"],
         model=plan["model"],
@@ -283,6 +373,41 @@ def apply_action(payload: VoiceApplyActionRequest) -> VoiceApplyActionOut:
             )
 
     raise HTTPException(status_code=400, detail="Unsupported action")
+
+
+@router.get("/history-config", response_model=ChatHistoryConfigOut)
+def get_history_config() -> dict:
+    with get_connection() as conn:
+        return _get_chat_history_config(conn)
+
+
+@router.post("/history-config", response_model=ChatHistoryConfigOut)
+def update_history_config(payload: ChatHistoryConfigUpdate) -> dict:
+    with get_connection() as conn:
+        return _set_chat_history_config(conn, payload.enabled, payload.retention_days)
+
+
+@router.get("/history", response_model=list[ChatHistoryMessageOut])
+def get_history(limit: int = 50) -> list[dict]:
+    safe_limit = max(1, min(limit, 200))
+    with get_connection() as conn:
+        cfg = _get_chat_history_config(conn)
+        _purge_old_chat_messages(conn, cfg["retention_days"])
+        rows = conn.execute(
+            (
+                "SELECT id, role, content, intent, provider, model, created_at "
+                "FROM chat_messages ORDER BY created_at DESC LIMIT ?"
+            ),
+            (safe_limit,),
+        ).fetchall()
+    return [row_to_dict(row) for row in rows]
+
+
+@router.post("/history/clear", status_code=200)
+def clear_history() -> dict:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM chat_messages")
+    return {"status": "ok"}
 
 
 @router.post("/confirm-tasks", response_model=VoiceConfirmTasksOut, status_code=201)

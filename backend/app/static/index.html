@@ -170,6 +170,24 @@
           </form>
           <pre id="integrationState" class="json"></pre>
         </div>
+        <div class="card">
+          <h2>Chat History</h2>
+          <form id="chatHistoryForm" class="stack">
+            <label class="inline">
+              <input type="checkbox" name="enabled" />
+              Save chat history
+            </label>
+            <label>
+              Retention days
+              <input name="retention_days" type="number" min="1" max="365" value="30" />
+            </label>
+            <div class="grid two">
+              <button class="button" type="submit">Save Chat Settings</button>
+              <button id="clearChatHistoryBtn" class="button ghost" type="button">Clear Chat History</button>
+            </div>
+          </form>
+          <pre id="chatHistoryState" class="json"></pre>
+        </div>
       </section>
 
       <section class="view" id="view-ai-voice">

@@ -98,6 +98,16 @@ CREATE TABLE IF NOT EXISTS integration_configs (
     settings_json TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id TEXT PRIMARY KEY,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    intent TEXT,
+    provider TEXT,
+    model TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 

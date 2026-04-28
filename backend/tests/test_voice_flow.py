@@ -326,3 +326,40 @@ def test_delete_done_tasks_for_yesterday() -> None:
         )
         assert preview.status_code == 200
         assert preview.json()["affected_count"] >= 1
+
+
+def test_chat_history_config_and_clear() -> None:
+    with TestClient(app) as client:
+        cfg = client.get("/api/voice/history-config")
+        assert cfg.status_code == 200
+        assert "enabled" in cfg.json()
+
+        update_cfg = client.post(
+            "/api/voice/history-config",
+            json={"enabled": True, "retention_days": 30},
+        )
+        assert update_cfg.status_code == 200
+        assert update_cfg.json()["enabled"] is True
+
+        list_response = client.post(
+            "/api/lists",
+            json={"name": "History List", "color": "#6366f1"},
+        )
+        list_id = list_response.json()["id"]
+
+        turn = client.post(
+            "/api/voice/chat-turn",
+            json={"message": "Покажи задачи", "list_id": list_id},
+        )
+        assert turn.status_code == 200
+
+        history = client.get("/api/voice/history?limit=10")
+        assert history.status_code == 200
+        assert len(history.json()) >= 2
+
+        clear = client.post("/api/voice/history/clear")
+        assert clear.status_code == 200
+
+        history_after = client.get("/api/voice/history?limit=10")
+        assert history_after.status_code == 200
+        assert history_after.json() == []

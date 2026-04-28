@@ -354,3 +354,23 @@ class VoiceApplyActionOut(BaseModel):
     tasks: list[TaskOut]
     assistant_reply: str
     preview_only: bool
+
+
+class ChatHistoryConfigOut(BaseModel):
+    enabled: bool
+    retention_days: int
+
+
+class ChatHistoryConfigUpdate(BaseModel):
+    enabled: bool
+    retention_days: int = Field(default=30, ge=1, le=365)
+
+
+class ChatHistoryMessageOut(BaseModel):
+    id: str
+    role: str
+    content: str
+    intent: str | None
+    provider: str | None
+    model: str | None
+    created_at: datetime

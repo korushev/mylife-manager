@@ -354,6 +354,19 @@ async function renderStubsAndSettings() {
   const voice = await api("/api/voice/capabilities");
   document.getElementById("aiState").textContent = JSON.stringify(ai, null, 2);
   document.getElementById("voiceState").textContent = JSON.stringify(voice, null, 2);
+
+  const chatHistoryConfig = await api("/api/voice/history-config");
+  document.querySelector("#chatHistoryForm input[name='enabled']").checked =
+    chatHistoryConfig.enabled;
+  document.querySelector("#chatHistoryForm input[name='retention_days']").value =
+    chatHistoryConfig.retention_days;
+
+  const history = await api("/api/voice/history?limit=20");
+  document.getElementById("chatHistoryState").textContent = JSON.stringify(
+    { config: chatHistoryConfig, recent_messages: history },
+    null,
+    2
+  );
 }
 
 function syncSelects() {
@@ -774,6 +787,35 @@ function bindForms() {
       });
       document.getElementById("integrationState").textContent = JSON.stringify(response, null, 2);
       toast("Settings saved");
+    } catch (error) {
+      toast(normalizeApiError(error));
+    }
+  });
+
+  document.getElementById("chatHistoryForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      const payload = {
+        enabled: form.elements.enabled.checked,
+        retention_days: Number(formValue(form, "retention_days")) || 30,
+      };
+      await api("/api/voice/history-config", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      toast("Chat history settings saved");
+      await renderStubsAndSettings();
+    } catch (error) {
+      toast(normalizeApiError(error));
+    }
+  });
+
+  document.getElementById("clearChatHistoryBtn").addEventListener("click", async () => {
+    try {
+      await api("/api/voice/history/clear", { method: "POST" });
+      toast("Chat history cleared");
+      await renderStubsAndSettings();
     } catch (error) {
       toast(normalizeApiError(error));
     }
