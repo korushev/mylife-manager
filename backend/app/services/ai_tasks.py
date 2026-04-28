@@ -209,6 +209,12 @@ def _fallback_operation(message: str) -> dict[str, Any] | None:
             task_text = message[index + len(marker) :].strip(" .,:;!?")
             break
 
+    relative_day: str | None = None
+    if "вчера" in text or "yesterday" in text:
+        relative_day = "yesterday"
+    elif "сегодня" in text or "today" in text:
+        relative_day = "today"
+
     if is_delete:
         return {
             "type": "delete",
@@ -216,6 +222,7 @@ def _fallback_operation(message: str) -> dict[str, Any] | None:
             "status": status,
             "without_deadline": without_deadline,
             "new_status": None,
+            "relative_day": relative_day,
             "limit": 20,
         }
 
@@ -229,6 +236,7 @@ def _fallback_operation(message: str) -> dict[str, Any] | None:
             "status": status,
             "without_deadline": without_deadline,
             "new_status": new_status,
+            "relative_day": relative_day,
             "limit": 20,
         }
 
@@ -238,6 +246,7 @@ def _fallback_operation(message: str) -> dict[str, Any] | None:
         "status": status,
         "without_deadline": without_deadline,
         "new_status": None,
+        "relative_day": relative_day,
         "limit": 20,
     }
 
@@ -421,7 +430,8 @@ def chat_turn_plan(
         '{"intent":string,"assistant_reply":string,"actions":[{"action":string,"label":string}],'
         '"operation":{"type":"query"|"delete"|"update_status","text":string|null,'
         '"status":"inbox"|"todo"|"in_progress"|"done"|null,"without_deadline":boolean,'
-        '"new_status":"inbox"|"todo"|"in_progress"|"done"|null,"limit":number}|null}. '
+        '"new_status":"inbox"|"todo"|"in_progress"|"done"|null,'
+        '"relative_day":"today"|"yesterday"|null,"limit":number}|null}. '
         "Keep assistant_reply short and natural in Russian. Mention sprint focus in one short sentence."
     )
 
@@ -501,6 +511,7 @@ def chat_turn_plan(
                 "status": parsed_operation.get("status"),
                 "without_deadline": bool(parsed_operation.get("without_deadline")),
                 "new_status": parsed_operation.get("new_status"),
+                "relative_day": parsed_operation.get("relative_day"),
                 "limit": int(parsed_operation.get("limit") or 10),
             }
             if parsed_operation["type"] not in {"query", "delete", "update_status"}:

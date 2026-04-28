@@ -305,6 +305,7 @@ class VoiceOperationOut(BaseModel):
     status: TaskStatus | None = None
     without_deadline: bool = False
     new_status: TaskStatus | None = None
+    relative_day: Literal["today", "yesterday"] | None = None
     limit: int = Field(default=10, ge=1, le=50)
 
 

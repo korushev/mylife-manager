@@ -425,13 +425,16 @@ async function parseVoiceTranscript({ announce = true } = {}) {
 
   addVoiceMessage(
     "assistant",
-    `${plan.assistant_reply} [${plan.provider}${plan.model ? `:${plan.model}` : ""}]`
+    `${plan.assistant_reply}`
   );
 
   renderVoiceActions(plan.actions || []);
 
   if (plan.error) {
-    addVoiceMessage("assistant", `Fallback reason: ${plan.error}`);
+    addVoiceMessage(
+      "assistant",
+      "Был технический сбой у AI-провайдера, но базовую логику я сохранил и продолжаю работать."
+    );
   }
 
   if (announce && plan.tasks?.length) {
@@ -595,7 +598,7 @@ function bindVoice() {
     recognition = new RecognitionClass();
     recognition.lang = "ru-RU";
     recognition.interimResults = true;
-    recognition.continuous = false;
+    recognition.continuous = true;
 
     recognition.onresult = (event) => {
       let text = "";
@@ -606,15 +609,15 @@ function bindVoice() {
     };
 
     recognition.onend = async () => {
-      recognitionActive = false;
-      if (inputNode.value.trim()) {
+      if (recognitionActive) {
         try {
-          await parseVoiceTranscript({ announce: true });
-        } catch (error) {
-          toast(normalizeApiError(error));
-          addVoiceMessage("assistant", normalizeApiError(error));
+          recognition.start();
+          return;
+        } catch (_error) {
+          // noop, user can start again
         }
       }
+      recognitionActive = false;
     };
   }
 
@@ -636,6 +639,12 @@ function bindVoice() {
       recognition.stop();
       recognitionActive = false;
       toast("Dictation stopped");
+      if (inputNode.value.trim()) {
+        parseVoiceTranscript({ announce: true }).catch((error) => {
+          toast(normalizeApiError(error));
+          addVoiceMessage("assistant", normalizeApiError(error));
+        });
+      }
     }
   });
 

@@ -160,6 +160,12 @@ def _find_tasks_by_operation(
     if operation.get("without_deadline"):
         where.append("deadline IS NULL")
 
+    relative_day = operation.get("relative_day")
+    if relative_day == "yesterday":
+        where.append("date(updated_at) = date('now', '-1 day')")
+    elif relative_day == "today":
+        where.append("date(updated_at) = date('now')")
+
     sql = TASK_SELECT
     if where:
         sql += " WHERE " + " AND ".join(where)

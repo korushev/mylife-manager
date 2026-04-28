@@ -275,3 +275,54 @@ def test_query_intent_does_not_call_provider_for_non_ascii_key(monkeypatch) -> N
         assert data["intent"] == "task_query"
         assert data["error"] is None
         assert any(action["action"] == "run_query" for action in data["actions"])
+
+
+def test_delete_done_tasks_for_yesterday() -> None:
+    with TestClient(app) as client:
+        list_response = client.post(
+            "/api/lists",
+            json={"name": "Yesterday Ops", "color": "#16a34a"},
+        )
+        list_id = list_response.json()["id"]
+
+        task_response = client.post(
+            "/api/tasks",
+            json={
+                "title": "Вчерашняя закрытая задача",
+                "status": "done",
+                "priority": "medium",
+                "duration_min": 15,
+                "list_id": list_id,
+            },
+        )
+        assert task_response.status_code == 201
+        task_id = task_response.json()["id"]
+
+        # Make task look like it was updated yesterday.
+        from backend.app.database import get_connection
+
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET updated_at = datetime('now', '-1 day') WHERE id = ?",
+                (task_id,),
+            )
+
+        turn = client.post(
+            "/api/voice/chat-turn",
+            json={"message": "удали задачи которые я вчера сделал", "list_id": list_id},
+        )
+        assert turn.status_code == 200
+        plan = turn.json()
+        assert plan["intent"] == "task_delete"
+        assert plan["operation"]["relative_day"] == "yesterday"
+
+        preview = client.post(
+            "/api/voice/apply-action",
+            json={
+                "action": "run_query",
+                "operation": plan["operation"],
+                "list_id": list_id,
+            },
+        )
+        assert preview.status_code == 200
+        assert preview.json()["affected_count"] >= 1
