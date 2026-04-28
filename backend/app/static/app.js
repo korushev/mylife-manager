@@ -360,10 +360,13 @@ async function renderStubsAndSettings() {
     chatHistoryConfig.enabled;
   document.querySelector("#chatHistoryForm input[name='retention_days']").value =
     chatHistoryConfig.retention_days;
+  document.querySelector("#chatHistoryForm input[name='context_limit']").value =
+    chatHistoryConfig.context_limit;
 
   const history = await api("/api/voice/history?limit=20");
+  const memory = await api("/api/voice/memory?limit=20");
   document.getElementById("chatHistoryState").textContent = JSON.stringify(
-    { config: chatHistoryConfig, recent_messages: history },
+    { config: chatHistoryConfig, recent_messages: history, long_memory: memory },
     null,
     2
   );
@@ -799,6 +802,7 @@ function bindForms() {
       const payload = {
         enabled: form.elements.enabled.checked,
         retention_days: Number(formValue(form, "retention_days")) || 30,
+        context_limit: Number(formValue(form, "context_limit")) || 10,
       };
       await api("/api/voice/history-config", {
         method: "POST",
@@ -815,6 +819,16 @@ function bindForms() {
     try {
       await api("/api/voice/history/clear", { method: "POST" });
       toast("Chat history cleared");
+      await renderStubsAndSettings();
+    } catch (error) {
+      toast(normalizeApiError(error));
+    }
+  });
+
+  document.getElementById("clearLongMemoryBtn").addEventListener("click", async () => {
+    try {
+      await api("/api/voice/memory/clear", { method: "POST" });
+      toast("Long memory cleared");
       await renderStubsAndSettings();
     } catch (error) {
       toast(normalizeApiError(error));

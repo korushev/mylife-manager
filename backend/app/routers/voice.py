@@ -10,6 +10,7 @@ from backend.app.schemas import (
     ChatHistoryConfigOut,
     ChatHistoryConfigUpdate,
     ChatHistoryMessageOut,
+    MemoryFactOut,
     StubCapabilityOut,
     TaskOut,
     VoiceApplyActionOut,
@@ -42,6 +43,7 @@ TASK_SELECT = (
 _ACTIVE_SPRINT_KEY = "active_sprint_id"
 _CHAT_HISTORY_ENABLED_KEY = "chat_history_enabled"
 _CHAT_HISTORY_RETENTION_KEY = "chat_history_retention_days"
+_CHAT_HISTORY_CONTEXT_LIMIT_KEY = "chat_history_context_limit"
 
 
 def _validate_refs(
@@ -130,6 +132,10 @@ def _get_chat_history_config(conn) -> dict:
     retention_row = conn.execute(
         "SELECT value FROM app_settings WHERE key = ?", (_CHAT_HISTORY_RETENTION_KEY,)
     ).fetchone()
+    context_limit_row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?",
+        (_CHAT_HISTORY_CONTEXT_LIMIT_KEY,),
+    ).fetchone()
 
     enabled = True
     if enabled_row is not None:
@@ -142,10 +148,23 @@ def _get_chat_history_config(conn) -> dict:
         except (TypeError, ValueError):
             retention_days = 30
 
-    return {"enabled": enabled, "retention_days": retention_days}
+    context_limit = 10
+    if context_limit_row is not None:
+        try:
+            context_limit = max(4, min(int(context_limit_row["value"]), 40))
+        except (TypeError, ValueError):
+            context_limit = 10
+
+    return {
+        "enabled": enabled,
+        "retention_days": retention_days,
+        "context_limit": context_limit,
+    }
 
 
-def _set_chat_history_config(conn, enabled: bool, retention_days: int) -> dict:
+def _set_chat_history_config(
+    conn, enabled: bool, retention_days: int, context_limit: int
+) -> dict:
     now = utc_now()
     conn.execute(
         (
@@ -161,7 +180,18 @@ def _set_chat_history_config(conn, enabled: bool, retention_days: int) -> dict:
         ),
         (_CHAT_HISTORY_RETENTION_KEY, str(retention_days), now),
     )
-    return {"enabled": enabled, "retention_days": retention_days}
+    conn.execute(
+        (
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        ),
+        (_CHAT_HISTORY_CONTEXT_LIMIT_KEY, str(context_limit), now),
+    )
+    return {
+        "enabled": enabled,
+        "retention_days": retention_days,
+        "context_limit": context_limit,
+    }
 
 
 def _purge_old_chat_messages(conn, retention_days: int) -> None:
@@ -191,6 +221,87 @@ def _log_chat_message(
             "VALUES (?, ?, ?, ?, ?, ?, ?)"
         ),
         (new_id(), role, content, intent, provider, model, utc_now()),
+    )
+
+
+def _fetch_short_history(conn, limit: int) -> list[dict]:
+    rows = conn.execute(
+        (
+            "SELECT role, content, created_at FROM chat_messages "
+            "ORDER BY created_at DESC LIMIT ?"
+        ),
+        (limit,),
+    ).fetchall()
+    items = [row_to_dict(row) for row in rows]
+    items.reverse()
+    return items
+
+
+def _fetch_long_memory(conn, limit: int = 20) -> list[dict]:
+    rows = conn.execute(
+        (
+            "SELECT id, fact, source, created_at, updated_at "
+            "FROM memory_facts ORDER BY updated_at DESC LIMIT ?"
+        ),
+        (limit,),
+    ).fetchall()
+    return [row_to_dict(row) for row in rows]
+
+
+def _memory_candidates_from_user_message(message: str) -> list[str]:
+    text = message.strip()
+    lower = text.lower()
+    candidates: list[str] = []
+
+    if "спринт" in lower and any(
+        x in lower for x in ("работ", "сем", "рост", "здоров")
+    ):
+        candidates.append(
+            "Пользователь планирует спринтами и использует 4 направления: "
+            "работа/финансы, семья/отношения, личностный рост, здоровье."
+        )
+    if any(x in lower for x in ("голос", "диктов", "аудио")) and any(
+        x in lower for x in ("основ", "глав", "важно")
+    ):
+        candidates.append(
+            "Голосовой ввод — приоритетный способ взаимодействия для пользователя."
+        )
+    if (
+        any(x in lower for x in ("мне важно", "мне нужно", "я хочу"))
+        and len(text) <= 220
+    ):
+        candidates.append(text[:220])
+
+    # Keep unique order
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _upsert_memory_fact(conn, fact: str, source: str = "auto") -> None:
+    now = utc_now()
+    existing = conn.execute(
+        "SELECT id FROM memory_facts WHERE LOWER(fact) = LOWER(?)",
+        (fact,),
+    ).fetchone()
+    if existing is not None:
+        conn.execute(
+            "UPDATE memory_facts SET updated_at = ? WHERE id = ?",
+            (now, existing["id"]),
+        )
+        return
+    conn.execute(
+        (
+            "INSERT INTO memory_facts (id, fact, source, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)"
+        ),
+        (new_id(), fact, source, now, now),
     )
 
 
@@ -276,14 +387,24 @@ def voice_capabilities() -> StubCapabilityOut:
 def chat_turn(payload: VoiceChatTurnRequest) -> VoiceChatTurnOut:
     with get_connection() as conn:
         active = _active_sprint_context(conn)
+        history_cfg = _get_chat_history_config(conn)
+        short_history = _fetch_short_history(conn, history_cfg["context_limit"])
+        long_memory = _fetch_long_memory(conn, limit=20)
 
-    plan = chat_turn_plan(payload.message, active_sprint_name=active["name"])
+    plan = chat_turn_plan(
+        payload.message,
+        active_sprint_name=active["name"],
+        short_history=short_history,
+        long_memory=long_memory,
+    )
     with get_connection() as conn:
         _log_chat_message(
             conn,
             role="user",
             content=payload.message,
         )
+        for fact in _memory_candidates_from_user_message(payload.message):
+            _upsert_memory_fact(conn, fact, source="auto")
         _log_chat_message(
             conn,
             role="assistant",
@@ -384,7 +505,12 @@ def get_history_config() -> dict:
 @router.post("/history-config", response_model=ChatHistoryConfigOut)
 def update_history_config(payload: ChatHistoryConfigUpdate) -> dict:
     with get_connection() as conn:
-        return _set_chat_history_config(conn, payload.enabled, payload.retention_days)
+        return _set_chat_history_config(
+            conn,
+            payload.enabled,
+            payload.retention_days,
+            payload.context_limit,
+        )
 
 
 @router.get("/history", response_model=list[ChatHistoryMessageOut])
@@ -407,6 +533,20 @@ def get_history(limit: int = 50) -> list[dict]:
 def clear_history() -> dict:
     with get_connection() as conn:
         conn.execute("DELETE FROM chat_messages")
+    return {"status": "ok"}
+
+
+@router.get("/memory", response_model=list[MemoryFactOut])
+def get_memory(limit: int = 50) -> list[dict]:
+    safe_limit = max(1, min(limit, 200))
+    with get_connection() as conn:
+        return _fetch_long_memory(conn, safe_limit)
+
+
+@router.post("/memory/clear", status_code=200)
+def clear_memory() -> dict:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM memory_facts")
     return {"status": "ok"}
 
 

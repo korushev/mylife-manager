@@ -359,11 +359,13 @@ class VoiceApplyActionOut(BaseModel):
 class ChatHistoryConfigOut(BaseModel):
     enabled: bool
     retention_days: int
+    context_limit: int
 
 
 class ChatHistoryConfigUpdate(BaseModel):
     enabled: bool
     retention_days: int = Field(default=30, ge=1, le=365)
+    context_limit: int = Field(default=10, ge=4, le=40)
 
 
 class ChatHistoryMessageOut(BaseModel):
@@ -374,3 +376,11 @@ class ChatHistoryMessageOut(BaseModel):
     provider: str | None
     model: str | None
     created_at: datetime
+
+
+class MemoryFactOut(BaseModel):
+    id: str
+    fact: str
+    source: str
+    created_at: datetime
+    updated_at: datetime

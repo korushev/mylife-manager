@@ -108,6 +108,14 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     model TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS memory_facts (
+    id TEXT PRIMARY KEY,
+    fact TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'auto',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 

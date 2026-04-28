@@ -336,10 +336,11 @@ def test_chat_history_config_and_clear() -> None:
 
         update_cfg = client.post(
             "/api/voice/history-config",
-            json={"enabled": True, "retention_days": 30},
+            json={"enabled": True, "retention_days": 30, "context_limit": 12},
         )
         assert update_cfg.status_code == 200
         assert update_cfg.json()["enabled"] is True
+        assert update_cfg.json()["context_limit"] == 12
 
         list_response = client.post(
             "/api/lists",
@@ -363,3 +364,36 @@ def test_chat_history_config_and_clear() -> None:
         history_after = client.get("/api/voice/history?limit=10")
         assert history_after.status_code == 200
         assert history_after.json() == []
+
+
+def test_long_memory_auto_extract_and_clear() -> None:
+    with TestClient(app) as client:
+        list_response = client.post(
+            "/api/lists",
+            json={"name": "Memory List", "color": "#a855f7"},
+        )
+        list_id = list_response.json()["id"]
+
+        turn = client.post(
+            "/api/voice/chat-turn",
+            json={
+                "message": (
+                    "Мне важно планировать спринтами по четырем направлениям: "
+                    "работа и финансы, семья и отношения, личностный рост и здоровье"
+                ),
+                "list_id": list_id,
+            },
+        )
+        assert turn.status_code == 200
+
+        memory = client.get("/api/voice/memory?limit=20")
+        assert memory.status_code == 200
+        facts = memory.json()
+        assert len(facts) >= 1
+        assert any("спринт" in fact["fact"].lower() for fact in facts)
+
+        clear_memory = client.post("/api/voice/memory/clear")
+        assert clear_memory.status_code == 200
+        memory_after = client.get("/api/voice/memory?limit=20")
+        assert memory_after.status_code == 200
+        assert memory_after.json() == []

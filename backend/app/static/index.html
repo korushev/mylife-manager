@@ -181,10 +181,15 @@
               Retention days
               <input name="retention_days" type="number" min="1" max="365" value="30" />
             </label>
+            <label>
+              Short memory context (messages)
+              <input name="context_limit" type="number" min="4" max="40" value="10" />
+            </label>
             <div class="grid two">
               <button class="button" type="submit">Save Chat Settings</button>
               <button id="clearChatHistoryBtn" class="button ghost" type="button">Clear Chat History</button>
             </div>
+            <button id="clearLongMemoryBtn" class="button ghost" type="button">Clear Long Memory</button>
           </form>
           <pre id="chatHistoryState" class="json"></pre>
         </div>

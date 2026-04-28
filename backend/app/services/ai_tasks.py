@@ -321,7 +321,10 @@ def extract_tasks_from_message(message: str) -> dict[str, Any]:
 
 
 def chat_turn_plan(
-    message: str, active_sprint_name: str | None = None
+    message: str,
+    active_sprint_name: str | None = None,
+    short_history: list[dict] | None = None,
+    long_memory: list[dict] | None = None,
 ) -> dict[str, Any]:
     cfg = _provider_config()
     runtime = provider_runtime_status()
@@ -342,6 +345,17 @@ def chat_turn_plan(
         f"Активный спринт: {active_sprint_name}. Новые задачи будут привязаны к нему."
         if active_sprint_name
         else "Активный спринт не выбран. Новые задачи попадут в общий inbox."
+    )
+    short_history = short_history or []
+    long_memory = long_memory or []
+    short_context = "\n".join(
+        [
+            f"{item.get('role', 'user')}: {item.get('content', '')}"
+            for item in short_history
+        ]
+    )
+    memory_context = "\n".join(
+        [f"- {item.get('fact', '')}" for item in long_memory if item.get("fact")]
     )
 
     if operation is not None:
@@ -440,6 +454,14 @@ def chat_turn_plan(
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "system", "content": f"Sprint context: {sprint_hint}"},
+            {
+                "role": "system",
+                "content": f"Long-term memory:\n{memory_context or '-'}",
+            },
+            {
+                "role": "system",
+                "content": f"Recent chat context:\n{short_context or '-'}",
+            },
             {"role": "user", "content": message},
         ],
         "temperature": 0.3,
