@@ -31,6 +31,15 @@ def test_voice_parse_and_create_task() -> None:
         assert create_response.status_code == 201
 
 
+def test_voice_runtime_endpoint() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/voice/runtime")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["mode"] in {"online", "fallback"}
+        assert isinstance(payload["status_label"], str)
+
+
 def test_chat_turn_and_confirm_tasks() -> None:
     with TestClient(app) as client:
         list_response = client.post(

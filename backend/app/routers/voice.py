@@ -23,6 +23,7 @@ from backend.app.schemas import (
     VoiceCreateManyRequest,
     VoiceMessageAnalyzeOut,
     VoiceMessageAnalyzeRequest,
+    VoiceRuntimeOut,
     VoiceTaskCreateRequest,
     VoiceTaskParseOut,
     VoiceTaskParseRequest,
@@ -380,6 +381,29 @@ def voice_capabilities() -> StubCapabilityOut:
             f"AI provider={runtime['provider']} ({mode}), model={runtime['model']}. "
             "Chat-first flow: chat-turn -> confirm-tasks."
         ),
+    )
+
+
+@router.get("/runtime", response_model=VoiceRuntimeOut)
+def voice_runtime() -> VoiceRuntimeOut:
+    runtime = provider_runtime_status()
+    configured = bool(runtime["configured"])
+    mode = "online" if configured else "fallback"
+    status_label = (
+        f"DeepSeek Online ({runtime['model']})"
+        if configured and runtime["provider"] == "deepseek"
+        else (
+            f"OpenAI Online ({runtime['model']})"
+            if configured and runtime["provider"] == "openai"
+            else "Fallback Mode"
+        )
+    )
+    return VoiceRuntimeOut(
+        provider=runtime["provider"],
+        model=runtime["model"],
+        configured=configured,
+        mode=mode,
+        status_label=status_label,
     )
 
 

@@ -410,7 +410,6 @@ def chat_turn_plan(
         actions = (
             [
                 {"action": "save_tasks", "label": "Записать задачи"},
-                {"action": "edit_tasks", "label": "Исправить"},
                 {"action": "skip_tasks", "label": "Не записывать"},
             ]
             if has_tasks
@@ -517,7 +516,6 @@ def chat_turn_plan(
             elif tasks:
                 actions = [
                     {"action": "save_tasks", "label": "Записать задачи"},
-                    {"action": "edit_tasks", "label": "Исправить"},
                     {"action": "skip_tasks", "label": "Не записывать"},
                 ]
             else:
@@ -592,7 +590,6 @@ def chat_turn_plan(
             "actions": (
                 [
                     {"action": "save_tasks", "label": "Записать задачи"},
-                    {"action": "edit_tasks", "label": "Исправить"},
                     {"action": "skip_tasks", "label": "Не записывать"},
                 ]
                 if has_tasks

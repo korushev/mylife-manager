@@ -223,6 +223,14 @@ class StubCapabilityOut(BaseModel):
     message: str
 
 
+class VoiceRuntimeOut(BaseModel):
+    provider: str
+    model: str | None
+    configured: bool
+    mode: Literal["online", "fallback"]
+    status_label: str
+
+
 class VoiceTaskParseRequest(BaseModel):
     transcript: str = Field(min_length=1, max_length=4000)
     list_id: str | None = None

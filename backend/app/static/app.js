@@ -47,6 +47,14 @@ function renderVoiceSprintState() {
   node.textContent = "Active sprint: not selected (tasks go to inbox).";
 }
 
+function renderVoiceRuntimeState(runtime) {
+  const node = document.getElementById("voiceRuntimeStatus");
+  if (!node) {
+    return;
+  }
+  node.textContent = `AI mode: ${runtime.status_label}`;
+}
+
 function normalizeApiError(error) {
   if (typeof error.message !== "string") {
     return "Request failed";
@@ -352,8 +360,10 @@ async function renderStubsAndSettings() {
 
   const ai = await api("/api/ai/capabilities");
   const voice = await api("/api/voice/capabilities");
+  const voiceRuntime = await api("/api/voice/runtime");
   document.getElementById("aiState").textContent = JSON.stringify(ai, null, 2);
   document.getElementById("voiceState").textContent = JSON.stringify(voice, null, 2);
+  renderVoiceRuntimeState(voiceRuntime);
 
   const chatHistoryConfig = await api("/api/voice/history-config");
   document.querySelector("#chatHistoryForm input[name='enabled']").checked =
